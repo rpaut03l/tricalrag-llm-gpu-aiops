@@ -1,35 +1,69 @@
-# LogSentinel — Full Pipeline, Setup to Public Release
+# LogSentinel-RAG — End-to-End: Setup → Benchmark → Paper → arXiv
 
-## What we're building (recap)
-A **benchmark**, not just a one-off experiment: 4 real log datasets x 4 local
-open-weight LLMs x 2 baselines (cloud API + classical DeepLog), scored with
-statistical rigor (3 seeds, bootstrap 95% CI), plus ablations (prompt style,
-batch scaling, quantization). Released as open code + data splits so other
-researchers can reuse it — this reuse is what actually compounds citations
-over time, unlike a single closed experiment.
+**Status log:** this file is the living record of what's actually been done vs. what's next. Update it as each phase completes — don't let it drift out of sync with reality (an earlier version of this file predated the repo's actual structure; this rewrite fixes that).
+
+## What we're building
+A **benchmark**, not a one-off experiment: 4 real log datasets (BGL, HDFS, Thunderbird, OpenStack) × 4 local open-weight LLMs × 2 baselines (cloud API + classical DeepLog) × 3 prompt styles (zero-shot, few-shot, RAG), scored with statistical rigor (3 seeds, bootstrap 95% CI), plus ablations (batch scaling, quantization). The core benchmark makes a narrow, fully defensible claim using only real data and real model runs. Preliminary synthetic-data explorations (hardware cross-layer, full-stack trust/provisioning) live separately in `extensions/` and are **not** part of the core validated results — see `extensions/README.md`.
 
 ---
 
-## PHASE 1 — GPU Machine Setup
+## PHASE 0 — Machine Facts (recorded, don't re-verify unless something changes)
+
+- **GPU**: NVIDIA RTX PRO 6000 Blackwell, 96GB VRAM (97,887 MiB), idle at baseline
+- **Driver**: 595.58.03, **CUDA**: 13.2 (driver-reported; backward-compatible with CUDA 12.4 wheels)
+- **Architecture note**: Blackwell = compute capability sm_120. If stable `vllm` doesn't detect/use the GPU correctly, use the nightly build (Step 1.5 below) rather than debugging the stable release further.
+
 ```bash
 nvidia-smi
-sudo apt update && sudo apt install -y python3-pip python3-venv git texlive-full
+nvidia-smi --query-gpu=compute_cap --format=csv
+```
+
+## PHASE 1 — Clone + Environment Setup
+
+**Status: ⬜ not yet run**
+
+```bash
+cd ~
+git clone https://github.com/rpaut03l/logsentinel-rag-llm-gpu-aiops.git
+cd logsentinel-rag-llm-gpu-aiops
+pwd && ls -la
+```
+
+```bash
 python3 -m venv logsentinel-env
 source logsentinel-env/bin/activate
 pip install --upgrade pip
 pip install torch --index-url https://download.pytorch.org/whl/cu124
 cd benchmark
-pip install vllm pandas huggingface_hub tqdm scikit-learn matplotlib scipy
+pip install -r requirements.txt
+```
+
+**Step 1.5 — if vLLM has Blackwell issues**, swap the stable build for nightly:
+```bash
+pip uninstall vllm -y
+pip install --pre vllm --extra-index-url https://wheels.vllm.ai/nightly
+```
+
+**Sanity check — run this before moving on:**
+```bash
+python3 -c "import torch; print(torch.__version__, torch.cuda.is_available(), torch.cuda.get_device_name(0))"
+```
+Expected: a torch version, `True`, `NVIDIA RTX PRO 6000...`. Paste the actual output before proceeding to Phase 2.
+
+**Hugging Face auth** (needed before downloading gated models like Llama):
+```bash
+huggingface-cli login
 ```
 
 ## PHASE 2 — Get the 4 Datasets
+
+**Status: ⬜ not yet run**
+
 ```bash
-cd ..
+cd ~/logsentinel-rag-llm-gpu-aiops
 git clone https://github.com/logpai/loghub.git
 ```
-Follow each dataset's README.md inside `loghub/` (BGL, HDFS, Thunderbird,
-OpenStack) — LogHub gates the actual `.log` files behind Zenodo links for
-licensing/size reasons. Download and place them at:
+Follow each dataset's `README.md` inside `loghub/` (BGL, HDFS, Thunderbird, OpenStack) — LogHub gates the actual `.log` files behind Zenodo links for size/licensing reasons. Place them at:
 ```
 loghub/BGL/BGL.log
 loghub/HDFS/HDFS.log
@@ -40,129 +74,121 @@ loghub/OpenStack/OpenStack.log
 
 ```bash
 cd benchmark
-huggingface-cli login
 python loaders/multi_dataset_loader.py --seed 42 --out data/incidents.jsonl
 ```
-**Why:** normalizes all 4 datasets into one schema — 150 balanced incidents
-each, 600 total. Check the printed per-dataset breakdown matches expectations.
+**Why:** normalizes all 4 datasets into one schema — 150 balanced incidents each, 600 total. Check the printed per-dataset breakdown before moving on.
 
-## PHASE 3 — Run the Main Benchmark (3 seeds x 2 prompt styles)
+## PHASE 3 — Run the Main Benchmark (3 seeds × 3 prompt styles)
+
+**Status: ⬜ not yet run**
+
 ```bash
 for seed in 1 2 3; do
   python benchmark.py --seed $seed --prompt-style zero_shot
   python benchmark.py --seed $seed --prompt-style few_shot
+  python benchmark.py --seed $seed --prompt-style rag
 done
 ```
-**Why 3 seeds x 2 styles = 6 runs per model:** gives you both the
-statistical rigor (mean ± CI) and the prompt-style ablation from one sweep.
 Monitor VRAM in a second terminal: `watch -n 1 nvidia-smi`
 
-If you hit VRAM limits on the 70B model, comment it out of `MODELS` in
-`benchmark.py` and run it alone afterward with `gpu_memory_utilization=0.95`.
+If the 70B model hits VRAM limits, comment it out of `MODELS` in `benchmark.py` and run it alone afterward with `gpu_memory_utilization=0.95`.
+
+**Recommended first run**: test with just `llama3.1-8b` (comment out the other 3 models) and one seed/style combo to confirm the pipeline works end-to-end before committing GPU time to the full 3×3×4 sweep.
 
 ## PHASE 4 — Score with Bootstrap CI
+
+**Status: ⬜ not yet run**
+
 ```bash
 python score_results.py
 ```
-**Why:** produces `results/summary_metrics.csv` (per-dataset, per-model, with
-95% CI) and `results/macro_summary.csv` (macro-averaged headline table).
+Produces `results/summary_metrics.csv` (per-dataset, per-model, with 95% CI) and `results/macro_summary.csv` (macro-averaged headline table).
 
 ## PHASE 5 — Run Ablations
+
+**Status: ⬜ not yet run**
+
 ```bash
 python ablation.py --mode batch_sweep
 python ablation.py --mode quantization
 ```
-**Why:** batch sweep shows throughput scaling on your single 96GB card
-(novel data point — most papers assume clusters). Quantization comparison
-shows whether 4-bit AWQ hurts structured RCA accuracy enough to matter.
 
 ## PHASE 6 — Run the DeepLog Baseline
+
+**Status: ⬜ not yet run**
+
 ```bash
 cd ../baselines
-pip install torch scikit-learn
 python deeplog_baseline.py
 ```
-**Why:** gives you the classical-ML comparison point every AIOps reviewer
-will expect. Output lands in `../benchmark/results/deeplog_baseline.json`.
+Output lands in `../benchmark/results/deeplog_baseline.json`.
 
-## PHASE 7 — (Optional but recommended) Cloud API Baseline
-Add a small script calling GPT-4o-mini or Claude Haiku on the same
-`data/incidents.jsonl` with the same prompt template, log latency + cost
-per call, and score identically. This is the direct "local vs. cloud" claim
-your abstract needs.
+## PHASE 7 — (Optional) Cloud API Baseline
 
-## PHASE 8 — Generate Figures + Paper
+**Status: ⬜ not yet built**
+
+Add a script calling GPT-4o-mini or Claude Haiku on the same `data/incidents.jsonl` with the same prompt template, log latency + cost per call, score identically. Needed for the "local vs. cloud" comparison claim in the abstract.
+
+## PHASE 8 — Generate Figures + Write the Paper
+
+**Status: ⬜ not yet run**
+
 ```bash
 cd ../paper
-python3 generate_diagrams.py       # Figure 1 (pipeline) + Figure 2 (scope matrix)
-pip install pandas --break-system-packages
-python3 make_table.py              # (adapt from earlier version to read macro_summary.csv)
+python3 generate_diagrams.py
+python3 make_table.py   # reads macro_summary.csv, prints a LaTeX table to paste into main.tex
 ```
-Fill in `main.tex`:
-- Abstract's `[FILL IN YOUR TOP-LINE FINDING]`
-- Introduction, Related Work (add 3-5 recent arXiv papers on LLM-for-AIOps you find via search)
-- Results tables from `macro_summary.csv` and `summary_metrics.csv`
-- Discussion: cost-per-1000-incidents math, when LLMs beat/lose to DeepLog
+Fill in `main.tex`: abstract's top-line finding, Introduction, Related Work (add recent LLM-for-AIOps papers), Results tables, Discussion.
 
-Compile:
 ```bash
+sudo apt install -y texlive-full   # if not already installed
 pdflatex main.tex && bibtex main && pdflatex main.tex && pdflatex main.tex
 ```
 Proofread `main.pdf` fully before moving on.
 
-## PHASE 9 — Publish Code Publicly on GitHub
-```bash
-cd ..
-git init
-cat > .gitignore << 'EOF'
-logsentinel-env/
-*.pyc
-__pycache__/
-data/*.jsonl
-loghub/
-EOF
-git add .
-git commit -m "Initial release: LogSentinel benchmark for on-prem LLM-based AIOps RCA"
-gh repo create logsentinel-benchmark --public --source=. --push
-```
-**Why now, before arXiv:** you want the GitHub URL live so you can put it in
-the paper's abstract/footnote before submission — reviewers and future
-citers click through to it immediately.
+## PHASE 9 — GitHub
 
-Add a proper `README.md` to the repo root documenting how to reproduce every
-result (you already have the phases above — reuse them there).
+**Status: ✅ done** — repo live at `https://github.com/rpaut03l/logsentinel-rag-llm-gpu-aiops`, restructured (core benchmark vs. `extensions/`) on `main` as of the `restructure/core-vs-extensions` PR merge.
+
+Once real results exist, commit them:
+```bash
+cd ~/logsentinel-rag-llm-gpu-aiops
+git checkout -b add-benchmark-results
+git add benchmark/results/ benchmark/data/incidents.jsonl paper/main.tex paper/figures/
+git commit -m "Add real benchmark results and finalized paper draft"
+git push -u origin add-benchmark-results
+gh pr create --title "Add real benchmark results" --base main
+```
 
 ## PHASE 10 — arXiv Submission
+
+**Status: ⬜ not started**
+
 1. Register: https://arxiv.org/user/register
-2. Check endorsement need: https://arxiv.org/auth/endorse (start early, can take days)
+2. Check endorsement need: https://arxiv.org/auth/endorse (start early — can take days)
 3. Primary category: `cs.DC`; cross-list `cs.AI`, `cs.LG`, `cs.PF`
 4. Submit at https://arxiv.org/submit — upload `main.tex`, `references.bib`, `figures/`
 5. Review the compiled PDF preview carefully, then finalize
-6. Wait for moderation (1–2 business days) → get your arXiv ID
+6. Wait for moderation (1–2 business days) → get arXiv ID
 
 ## PHASE 11 — Hugging Face Papers + Papers with Code
-Once you have an arXiv ID:
-1. **Hugging Face Papers**: go to https://huggingface.co/papers/submit and submit your arXiv link — this surfaces it to the HF community and often drives early citations/discussion.
-2. **Papers with Code**: go to https://paperswithcode.com/submit, link your arXiv paper + your GitHub repo — this is specifically what makes benchmark papers discoverable to people looking for "SOTA on X" style leaderboards, which is a major long-term citation driver for benchmark-style papers.
-3. Also consider uploading your dataset splits (the `data/incidents.jsonl` files, properly licensed per each source dataset's terms) to **Hugging Face Datasets** so people can `load_dataset("your-username/logsentinel")` directly.
 
-## PHASE 12 — Also Submit to AI-SPC Workshop (parallel, optional)
-- Trim to 4 pages + 1 reference page (IEEE format) — keep only the macro
-  results table and one ablation, move the rest to an appendix or "extended
-  version on arXiv" footnote.
-- Confirm with chairs that arXiv preprints are acceptable given the
-  "unpublished manuscript" clause: <subhasis.banerjee@shell.com>,
-  <aniruddha.panda@shell.com>
-- Submission opens Sept 1, 2026; deadline Oct 15, 2026.
+**Status: ⬜ not started**
+
+Once you have an arXiv ID:
+1. Submit to https://huggingface.co/papers/submit
+2. Submit to https://paperswithcode.com/submit, linking the GitHub repo
+3. Consider uploading `data/incidents.jsonl` splits to Hugging Face Datasets (respecting each source dataset's original license terms)
+
+## PHASE 12 — AI-SPC 2026 Workshop Submission (parallel, optional)
+
+**Status: ⬜ not started**
+
+- Trim to 4 pages + 1 reference page (IEEE format)
+- Confirm with chairs that arXiv preprints are acceptable given the "unpublished manuscript" clause
+- Submission opens Sept 1, 2026; deadline Oct 15, 2026
 
 ---
 
 ## Realistic expectation-setting
-A well-executed benchmark paper with public code in a genuinely useful niche
-(on-prem AIOps is a real, growing need) can realistically accumulate
-citations over 1-3 years as people build on it or cite it as related work —
-but "millions of citations" is not something any single paper achieves;
-even top-cited-of-all-time papers (BERT, ResNet, Adam) sit in the tens of
-thousands after a decade. Building it this rigorously is what maximizes
-your realistic odds of steady, compounding citations — that's the honest
-target.
+This benchmark is built to be reused and cited over time — real datasets, real models, real statistical rigor. That's the right target. "Millions of citations" isn't a realistic goal for any single paper; steady, compounding citations from a genuinely reusable benchmark is.
