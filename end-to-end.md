@@ -9,9 +9,11 @@ A **benchmark**, not a one-off experiment: 4 real log datasets (BGL, HDFS, Thund
 
 ## PHASE 0 — Machine Facts (recorded, don't re-verify unless something changes)
 
-- **GPU**: NVIDIA RTX PRO 6000 Blackwell, 96GB VRAM (97,887 MiB), idle at baseline
-- **Driver**: 595.58.03, **CUDA**: 13.2 (driver-reported; backward-compatible with CUDA 12.4 wheels)
-- **Architecture note**: Blackwell = compute capability sm_120. If stable `vllm` doesn't detect/use the GPU correctly, use the nightly build (Step 1.5 below) rather than debugging the stable release further.
+- **GPU**: NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition, 96GB VRAM (97,887 MiB), idle at baseline
+- **Driver**: 595.58.03, **CUDA**: 13.2 (driver-reported)
+- **Confirmed working stack** (as of actual install on this machine): `torch==2.13.0+cu130`, `vllm==0.28.0`, `transformers==5.16.1` — the **stable** vLLM release (0.28.0) has native Blackwell/CUDA 13.0 support. The nightly-build fallback in earlier notes was unnecessary — stable install worked directly via `pip install -r requirements.txt`.
+- **GitHub auth on this machine**: a pre-existing SSH config had an old `Host github.com` block pointing to a repo-scoped deploy key (`~/.ssh/github_rtx6000`), which silently overrode any new key added afterward (SSH configs are first-match-wins). Fixed by rewriting `~/.ssh/config` to a single `Host github.com` block pointing to a new personal key (`~/.ssh/id_ed25519_personal`) with `IdentitiesOnly yes`. If cloning any new repo fails with "Repository not found" despite `ssh -T git@github.com` succeeding, check `cat ~/.ssh/config` for duplicate `Host github.com` entries first.
+- **CLI note**: `huggingface-cli` is deprecated on this environment's `huggingface_hub` version — use `hf auth login` (not `huggingface-cli login`, not `hf login`).
 
 ```bash
 nvidia-smi
@@ -20,11 +22,11 @@ nvidia-smi --query-gpu=compute_cap --format=csv
 
 ## PHASE 1 — Clone + Environment Setup
 
-**Status: ⬜ not yet run**
+**Status: ✅ done**
 
 ```bash
 cd ~
-git clone https://github.com/rpaut03l/logsentinel-rag-llm-gpu-aiops.git
+git clone git@github.com:rpaut03l/logsentinel-rag-llm-gpu-aiops.git
 cd logsentinel-rag-llm-gpu-aiops
 pwd && ls -la
 ```
@@ -38,26 +40,28 @@ cd benchmark
 pip install -r requirements.txt
 ```
 
-**Step 1.5 — if vLLM has Blackwell issues**, swap the stable build for nightly:
-```bash
-pip uninstall vllm -y
-pip install --pre vllm --extra-index-url https://wheels.vllm.ai/nightly
-```
+**Step 1.5 — Blackwell/vLLM note**: NOT needed on this machine. The stable `pip install -r requirements.txt` resolved to `vllm==0.28.0` + `torch==2.13.0+cu130`, both with native Blackwell support out of the box. Skip the nightly-build workaround unless a future dependency resolution regresses this.
 
-**Sanity check — run this before moving on:**
+**Sanity check — confirmed passing:**
 ```bash
 python3 -c "import torch; print(torch.__version__, torch.cuda.is_available(), torch.cuda.get_device_name(0))"
+# Output: 2.13.0+cu130 True NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition
 ```
-Expected: a torch version, `True`, `NVIDIA RTX PRO 6000...`. Paste the actual output before proceeding to Phase 2.
 
 **Hugging Face auth** (needed before downloading gated models like Llama):
 ```bash
-huggingface-cli login
+hf auth login
+```
+(Not `huggingface-cli login` — deprecated on this `huggingface_hub` version. Not `hf login` — that command doesn't exist; it's `hf auth login`.) Paste a token from https://huggingface.co/settings/tokens when prompted.
+
+Verify:
+```bash
+hf auth whoami
 ```
 
 ## PHASE 2 — Get the 4 Datasets
 
-**Status: ⬜ not yet run**
+**Status: 🔄 next up**
 
 ```bash
 cd ~/logsentinel-rag-llm-gpu-aiops
