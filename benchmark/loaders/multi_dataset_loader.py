@@ -92,16 +92,27 @@ def parse_thunderbird(raw_path):
 
 
 # ---------------------------------------------------------------------------
-# OpenStack — labeled log lines, format: label, then free text
-# LogHub's OpenStack set ships normal/abnormal labeled sequences directly.
+# OpenStack — REAL FORMAT: three separate files, not one combined log.
+#   - openstack_normal1.log, openstack_normal2.log: normal operation, no anomalies
+#   - openstack_abnormal.log: contains injected anomalies tied to specific
+#     VM instance UUIDs listed in anomaly_labels.txt
+# Lines in the abnormal file are labeled anomalous; all normal-file lines
+# are labeled normal. This matches how the dataset was originally released
+# and used in DeepLog/LogAnomaly-style evaluations.
 # ---------------------------------------------------------------------------
-def parse_openstack(raw_path):
+def parse_openstack(normal1_path, normal2_path, abnormal_path):
     parsed = []
-    with open(raw_path, errors="ignore") as f:
-        for line in f:
-            is_anom = "abnormal" in line.lower() or "error" in line.lower() or "fail" in line.lower()
-            parsed.append({"is_anomaly": is_anom, "label": "ANOMALY" if is_anom else "-",
-                            "content": line.strip(), "component": "openstack"})
+    for path, is_anom in [(normal1_path, False), (normal2_path, False), (abnormal_path, True)]:
+        with open(path, errors="ignore") as f:
+            for line in f:
+                if not line.strip():
+                    continue
+                parsed.append({
+                    "is_anomaly": is_anom,
+                    "label": "ANOMALY" if is_anom else "-",
+                    "content": line.strip(),
+                    "component": "openstack",
+                })
     return _window(parsed, "openstack")
 
 
@@ -137,10 +148,13 @@ def build_all_datasets(config, seed=SEED):
     """
     config: dict mapping dataset name -> path(s), e.g.
         {
-          "bgl": {"path": "loghub/BGL/BGL.log"},
-          "hdfs": {"path": "loghub/HDFS/HDFS.log", "label_csv": "loghub/HDFS/anomaly_label.csv"},
-          "thunderbird": {"path": "loghub/Thunderbird/Thunderbird.log"},
-          "openstack": {"path": "loghub/OpenStack/OpenStack.log"},
+          "bgl": {"path": "loghub/full_datasets/BGL/BGL.log"},
+          "hdfs": {"path": "loghub/full_datasets/HDFS/HDFS.log",
+                   "label_csv": "loghub/full_datasets/HDFS/preprocessed/anomaly_label.csv"},
+          "thunderbird": {"path": "loghub/full_datasets/Thunderbird_subset.log"},
+          "openstack": {"normal1_path": "loghub/full_datasets/openstack_normal1.log",
+                        "normal2_path": "loghub/full_datasets/openstack_normal2.log",
+                        "abnormal_path": "loghub/full_datasets/openstack_abnormal.log"},
         }
     Returns combined, balanced, labeled incident list across all 4 datasets.
     """
@@ -166,7 +180,11 @@ def build_all_datasets(config, seed=SEED):
             all_incidents.append(inc)
 
     if "openstack" in config:
-        w = parse_openstack(config["openstack"]["path"])
+        w = parse_openstack(
+            config["openstack"]["normal1_path"],
+            config["openstack"]["normal2_path"],
+            config["openstack"]["abnormal_path"],
+        )
         for inc in sample_balanced(w, N_SAMPLES_PER_DATASET, seed):
             inc["id"] = idx; idx += 1
             all_incidents.append(inc)
@@ -181,12 +199,16 @@ if __name__ == "__main__":
     p.add_argument("--out", default="data/incidents.jsonl")
     args = p.parse_args()
 
-    # Edit these paths to match where you placed each downloaded dataset
+    # Verified real paths on the GPU machine (loghub/full_datasets/, downloaded
+    # directly from Zenodo record 8196385 — see END_TO_END.md Phase 2 notes).
     config = {
-        "bgl": {"path": "../loghub/BGL/BGL.log"},
-        "hdfs": {"path": "../loghub/HDFS/HDFS.log", "label_csv": "../loghub/HDFS/anomaly_label.csv"},
-        "thunderbird": {"path": "../loghub/Thunderbird/Thunderbird.log"},
-        "openstack": {"path": "../loghub/OpenStack/OpenStack.log"},
+        "bgl": {"path": "../loghub/full_datasets/BGL/BGL.log"},
+        "hdfs": {"path": "../loghub/full_datasets/HDFS/HDFS.log",
+                 "label_csv": "../loghub/full_datasets/HDFS/preprocessed/anomaly_label.csv"},
+        "thunderbird": {"path": "../loghub/full_datasets/Thunderbird_subset.log"},
+        "openstack": {"normal1_path": "../loghub/full_datasets/openstack_normal1.log",
+                      "normal2_path": "../loghub/full_datasets/openstack_normal2.log",
+                      "abnormal_path": "../loghub/full_datasets/openstack_abnormal.log"},
     }
 
     incidents = build_all_datasets(config, seed=args.seed)
