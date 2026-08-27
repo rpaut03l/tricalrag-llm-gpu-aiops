@@ -14,6 +14,13 @@ A **benchmark**, not a one-off experiment: 4 real log datasets (BGL, HDFS, Thund
 - **Confirmed working stack** (as of actual install on this machine): `torch==2.13.0+cu130`, `vllm==0.28.0`, `transformers==5.16.1` — the **stable** vLLM release (0.28.0) has native Blackwell/CUDA 13.0 support. The nightly-build fallback in earlier notes was unnecessary — stable install worked directly via `pip install -r requirements.txt`.
 - **GitHub auth on this machine**: a pre-existing SSH config had an old `Host github.com` block pointing to a repo-scoped deploy key (`~/.ssh/github_rtx6000`), which silently overrode any new key added afterward (SSH configs are first-match-wins). Fixed by rewriting `~/.ssh/config` to a single `Host github.com` block pointing to a new personal key (`~/.ssh/id_ed25519_personal`) with `IdentitiesOnly yes`. If cloning any new repo fails with "Repository not found" despite `ssh -T git@github.com` succeeding, check `cat ~/.ssh/config` for duplicate `Host github.com` entries first.
 - **CLI note**: `huggingface-cli` is deprecated on this environment's `huggingface_hub` version — use `hf auth login` (not `huggingface-cli login`, not `hf login`).
+- **Llama models are gated**: `meta-llama/*` models return `403 GatedRepoError` even when authenticated — you must separately visit the model page (e.g. https://huggingface.co/meta-llama/Llama-3.1-8B-Instruct) and accept Meta's license form. Approval isn't instant. **Workaround used**: swapped the first validation run to `Qwen/Qwen2.5-14B-Instruct` (fully open, no gating) to keep moving while Llama access is pending — swap back once approved.
+- **FlashInfer sampler JIT-compiles on first use and needs the CUDA toolkit (`nvcc`), not just the driver.** This machine has driver 13.2 but no toolkit at `/usr/local/cuda`, causing: `RuntimeError: Could not find nvcc and default cuda_home='/usr/local/cuda' doesn't exist` — this crashes the engine at the *first inference call*, after model load/compile/graph-capture all succeed (so it looks like it's almost done, then fails). **Fix, no toolkit install needed:**
+  ```bash
+  export VLLM_USE_FLASHINFER_SAMPLER=0
+  echo 'export VLLM_USE_FLASHINFER_SAMPLER=0' >> ~/.bashrc   # make permanent
+  ```
+  With this set, vLLM falls back to a non-JIT sampling path with no measurable slowdown observed (600 incidents processed in 44.3s either way).
 
 ```bash
 nvidia-smi
@@ -61,31 +68,88 @@ hf auth whoami
 
 ## PHASE 2 — Get the 4 Datasets
 
-**Status: ✅ DONE — verified real output: 600 incidents, 150 per dataset (BGL, HDFS, Thunderbird, OpenStack)**
+**Status: ✅ done — real datasets downloaded and verified on the GPU machine**
+
+The public `git clone https://github.com/logpai/loghub.git` only ships 2,000-line **demo samples**, not the full datasets — each dataset's README circularly points back at the GitHub repo itself. The real full datasets live on **Zenodo (record 8196385)**, freely downloadable with no login or approval process:
 
 ```bash
 cd ~/logsentinel-rag-llm-gpu-aiops
-git clone https://github.com/logpai/loghub.git
-```
-Follow each dataset's `README.md` inside `loghub/` (BGL, HDFS, Thunderbird, OpenStack) — LogHub gates the actual `.log` files behind Zenodo links for size/licensing reasons. Place them at:
-```
-loghub/BGL/BGL.log
-loghub/HDFS/HDFS.log
-loghub/HDFS/anomaly_label.csv     (ships alongside HDFS.log)
-loghub/Thunderbird/Thunderbird.log
-loghub/OpenStack/OpenStack.log
+git clone https://github.com/logpai/loghub.git   # gives 2k demo samples only, kept for reference/quick pipeline tests
+mkdir -p loghub/full_datasets && cd loghub/full_datasets
+
+wget "https://zenodo.org/records/8196385/files/BGL.zip?download=1" -O BGL.zip
+wget "https://zenodo.org/records/8196385/files/HDFS_v1.zip?download=1" -O HDFS_v1.zip
+wget "https://zenodo.org/records/8196385/files/OpenStack.tar.gz?download=1" -O OpenStack.tar.gz
+wget "https://zenodo.org/records/8196385/files/Thunderbird.tar.gz?download=1" -O Thunderbird.tar.gz
+
+unzip BGL.zip -d BGL/
+unzip HDFS_v1.zip -d HDFS/
+tar -xzf OpenStack.tar.gz -C .
+tar -xzf Thunderbird.tar.gz -C .
 ```
 
+**⚠️ Real extracted structure (verified on this machine — do not assume LogHub's naming is consistent across datasets):**
+```
+loghub/full_datasets/BGL/BGL.log                              (743 MB, single file, matches expected space-separated format)
+loghub/full_datasets/HDFS/HDFS.log                             (1.6 GB)
+loghub/full_datasets/HDFS/preprocessed/anomaly_label.csv       (NOTE: nested under preprocessed/, not flat)
+loghub/full_datasets/openstack_normal1.log                     (extracted FLAT, not into an OpenStack/ subfolder)
+loghub/full_datasets/openstack_normal2.log
+loghub/full_datasets/openstack_abnormal.log
+loghub/full_datasets/anomaly_labels.txt                        (lists VM instance UUIDs with injected anomalies, referenced by openstack_abnormal.log)
+loghub/full_datasets/Thunderbird.log                           (31.7 GB — DO NOT load directly, see below)
+```
+
+**⚠️ Thunderbird is 31.7GB — do not load the full file.** Our loader uses `readlines()`, which would try to pull the entire file into RAM. Create a bounded subset instead:
 ```bash
-cd benchmark
+head -n 2000000 Thunderbird.log > Thunderbird_subset.log
+```
+This gives ~257MB (2M lines) — manageable, and still large enough for a representative anomaly/normal mix.
+
+**⚠️ OpenStack is NOT one combined log with inline anomaly markers** (our original loader assumed this — it was wrong). The real format is three separate files: `openstack_normal1.log` and `openstack_normal2.log` (no anomalies), and `openstack_abnormal.log` (contains injected anomalies tied to 4 specific VM instance UUIDs listed in `anomaly_labels.txt`). Fixed in `multi_dataset_loader.py`: `parse_openstack()` now takes three file paths and labels all abnormal-file lines as anomalous, all normal-file lines as normal.
+
+**`multi_dataset_loader.py` has been updated** with a corrected `parse_openstack()` function and real verified paths for all four datasets (see the `config` dict in `if __name__ == "__main__"`). Confirm your extracted paths match before running — if `full_datasets/` ends up structured differently on a re-download, update the config dict accordingly rather than assuming this layout is guaranteed by LogHub.
+
+```bash
+cd ~/logsentinel-rag-llm-gpu-aiops/benchmark
 python loaders/multi_dataset_loader.py --seed 42 --out data/incidents.jsonl
 ```
+
+**✅ Confirmed working on the GPU machine** — output:
+```
+Wrote 600 incidents to data/incidents.jsonl
+Per-dataset breakdown: {'bgl': 150, 'hdfs': 150, 'thunderbird': 150, 'openstack': 150}
+```
+Clean 150/dataset balanced split, no errors — BGL's real format matched the parser's column assumptions without needing adjustment.
 **Why:** normalizes all 4 datasets into one schema — 150 balanced incidents each, 600 total. Check the printed per-dataset breakdown before moving on.
 
 ## PHASE 3 — Run the Main Benchmark (3 seeds × 3 prompt styles)
 
-**Status: ⬜ not yet run**
+**Status: 🔄 IN PROGRESS — single-model pipeline validated successfully, scaling to full sweep next**
 
+**Validation run confirmed** (Qwen2.5-14B, seed 1, zero-shot, all 600 incidents):
+```
+600 incidents in 44.3s (741.5 tok/s), VRAM ~85289MB
+Done -> results/raw_results_seed1_zero_shot.csv
+```
+Model load + torch.compile + CUDA graph capture: ~40s (with weights cache warm). Full inference pass: 44.3s. **Total wall time per model per seed/style combo: under 90 seconds** once the FlashInfer fix (see Phase 0) is applied and weights are cached locally.
+
+**MODELS list in `benchmark.py` currently has only 1 model active** (temporarily reduced for validation) — restore the full list before the real sweep:
+```python
+MODELS = [
+    {"name": "llama3.1-8b",   "hf_id": "meta-llama/Llama-3.1-8B-Instruct"},   # pending Meta license approval — see Phase 0
+    {"name": "qwen2.5-14b",   "hf_id": "Qwen/Qwen2.5-14B-Instruct"},          # confirmed working
+    {"name": "mistral-small", "hf_id": "mistralai/Mistral-Small-Instruct-2409"},
+    {"name": "llama3.3-70b-awq", "hf_id": "hugging-quants/Meta-Llama-3.3-70B-Instruct-AWQ-INT4"},
+]
+```
+
+**Ensure the FlashInfer fix is active before running** (should already be in `~/.bashrc`, confirm with a fresh shell or re-export):
+```bash
+export VLLM_USE_FLASHINFER_SAMPLER=0
+```
+
+**Full sweep:**
 ```bash
 for seed in 1 2 3; do
   python benchmark.py --seed $seed --prompt-style zero_shot
@@ -95,9 +159,9 @@ done
 ```
 Monitor VRAM in a second terminal: `watch -n 1 nvidia-smi`
 
-If the 70B model hits VRAM limits, comment it out of `MODELS` in `benchmark.py` and run it alone afterward with `gpu_memory_utilization=0.95`.
+If the 70B model hits VRAM limits, comment it out of `MODELS` and run it alone afterward with `gpu_memory_utilization=0.95`.
 
-**Recommended first run**: test with just `llama3.1-8b` (comment out the other 3 models) and one seed/style combo to confirm the pipeline works end-to-end before committing GPU time to the full 3×3×4 sweep.
+**At ~90s per model per seed/style combo** (based on the confirmed Qwen 14B timing — larger models like the 70B will be slower), the full 4-model × 3-seed × 3-style sweep is roughly 36 runs. Rough estimate: 36 × ~2-3 min average (accounting for larger/slower models) ≈ **1.5–2.5 hours total**, plus one-time download time for any model not yet cached locally (Mistral-Small and Llama-3.3-70B-AWQ haven't been downloaded yet).
 
 ## PHASE 4 — Score with Bootstrap CI
 

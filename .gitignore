@@ -3,3 +3,6 @@
 logsentinel-env/
 loghub/
 benchmark/data/
+__pycache__/
+*.pyc
+benchmark/results/

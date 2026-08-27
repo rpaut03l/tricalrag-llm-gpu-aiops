@@ -24,10 +24,10 @@ from prompts import build_prompt
 from retrieval import IncidentRetriever, build_retrieval_context
 
 MODELS = [
-    {"name": "llama3.1-8b",   "hf_id": "meta-llama/Llama-3.1-8B-Instruct"},
-    {"name": "qwen2.5-14b",   "hf_id": "Qwen/Qwen2.5-14B-Instruct"},
-    {"name": "mistral-small", "hf_id": "mistralai/Mistral-Small-Instruct-2409"},
-    {"name": "llama3.3-70b-awq", "hf_id": "hugging-quants/Meta-Llama-3.3-70B-Instruct-AWQ-INT4"},
+#    {"name": "llama3.1-8b",   "hf_id": "meta-llama/Llama-3.1-8B-Instruct"},
+     {"name": "qwen2.5-14b",   "hf_id": "Qwen/Qwen2.5-14B-Instruct"},
+#    {"name": "mistral-small", "hf_id": "mistralai/Mistral-Small-Instruct-2409"},
+#    {"name": "llama3.3-70b-awq", "hf_id": "hugging-quants/Meta-Llama-3.3-70B-Instruct-AWQ-INT4"},
 ]
 
 MAX_TOKENS = 200
