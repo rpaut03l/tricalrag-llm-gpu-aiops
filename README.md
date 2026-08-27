@@ -4,7 +4,7 @@
 
 ### On-Premise, Retrieval-Augmented LLM Benchmark for AIOps Root Cause Analysis
 
-*Can a single high-memory workstation GPU - running open-weight LLMs with retrieval over past incidents  -  match cloud APIs and classical ML for log-based anomaly detection and root cause analysis?*
+*Can a single high-memory workstation GPU  -  running open-weight LLMs with retrieval over past incidents  -  match cloud APIs and classical ML for log-based anomaly detection and root cause analysis?*
 
 [![Status](https://img.shields.io/badge/status-work--in--progress-yellow)]()
 [![License](https://img.shields.io/badge/license-TBD-lightgrey)]()
@@ -47,22 +47,29 @@ This is a **benchmark**, not a single experiment: it's built to be reused, exten
 ### 1. End-to-End Pipeline
 
 ```mermaid
+%%{init: {'theme': 'base', 'themeVariables': { 'lineColor': '#ffffff', 'edgeLabelBackground': '#2d2d2d', 'textColor': '#ffffff' }}}%%
 flowchart LR
-    A[("📂 Raw Logs<br/>BGL · HDFS · Thunderbird · OpenStack")] --> B["🔧 Unified Incident<br/>Windowing"]
-    B --> C{"Prompt<br/>Strategy"}
-    C -->|Zero-shot| D["Local LLM<br/>via vLLM"]
+    A(["📂 Raw Logs<br/>BGL · HDFS · Thunderbird · OpenStack"]):::input --> B["🔧 Unified Incident<br/>Windowing"]:::process
+    B --> C{"Prompt<br/>Strategy"}:::decision
+    C -->|Zero-shot| D["🖥️ Local LLM<br/>via vLLM<br/>(RTX PRO 6000)"]:::model
     C -->|Few-shot| D
-    C -->|RAG| E["🔍 Retrieve Top-3<br/>Similar Past Incidents"] --> D
-    D["🖥️ Local LLM<br/>(RTX PRO 6000)"] --> F["📋 Structured RCA Output<br/>JSON: anomaly · severity · root cause · remediation"]
-    F --> G["📊 Bootstrap-CI Scoring"]
-    H["☁️ Cloud API Baseline"] --> G
-    I["📈 DeepLog Baseline<br/>(LSTM)"] --> G
-    G --> J[("📄 Results:<br/>F1, Precision, Recall,<br/>Throughput, VRAM")]
+    C -->|RAG| E["🔍 Retrieve Top-3<br/>Similar Past Incidents"]:::retrieval --> D
+    D --> F["📋 Structured RCA Output<br/>JSON: anomaly · severity ·<br/>root cause · remediation"]:::output
+    F --> G["📊 Bootstrap-CI<br/>Scoring"]:::score
+    H["☁️ Cloud API Baseline"]:::baseline --> G
+    I["📈 DeepLog Baseline<br/>(LSTM)"]:::baseline --> G
+    G --> J(["📄 Results:<br/>F1 · Precision · Recall ·<br/>Throughput · VRAM"]):::result
 
-    style A fill:#e8f0fe,stroke:#333
-    style D fill:#fff3cd,stroke:#333
-    style G fill:#d4edda,stroke:#333
-    style J fill:#f8d7da,stroke:#333
+    classDef input fill:#1a73e8,stroke:#0d47a1,stroke-width:2px,color:#ffffff
+    classDef process fill:#fbbc04,stroke:#e37400,stroke-width:2px,color:#000000
+    classDef decision fill:#9c27b0,stroke:#4a148c,stroke-width:2px,color:#ffffff
+    classDef model fill:#ea4335,stroke:#b31412,stroke-width:2px,color:#ffffff
+    classDef retrieval fill:#34a853,stroke:#0d652d,stroke-width:2px,color:#ffffff
+    classDef output fill:#ff9800,stroke:#e65100,stroke-width:2px,color:#000000
+    classDef score fill:#00acc1,stroke:#006064,stroke-width:2px,color:#ffffff
+    classDef baseline fill:#757575,stroke:#212121,stroke-width:2px,color:#ffffff
+    classDef result fill:#43a047,stroke:#1b5e20,stroke-width:3px,color:#ffffff
+    linkStyle default stroke:#ffffff,stroke-width:2px,color:#ffffff
 ```
 
 **What this shows:** every incident flows through one of three prompting strategies before hitting the LLM. The RAG path adds a retrieval step that the zero-shot and few-shot paths skip entirely  -  this is the core experimental variable the benchmark measures.
@@ -72,6 +79,7 @@ flowchart LR
 ### 2. RAG Retrieval  -  Detailed Sequence
 
 ```mermaid
+%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#1a73e8', 'primaryTextColor': '#ffffff', 'primaryBorderColor': '#0d47a1', 'lineColor': '#ffffff', 'actorBkg': '#1a73e8', 'actorTextColor': '#ffffff', 'actorBorder': '#0d47a1', 'actorLineColor': '#ffffff', 'signalColor': '#ffffff', 'signalTextColor': '#ffffff', 'noteBkgColor': '#fff8e1', 'noteTextColor': '#000000', 'noteBorderColor': '#e37400', 'sequenceNumberColor': '#000000' }}}%%
 sequenceDiagram
     participant Inc as New Incident
     participant Emb as Sentence-Transformer<br/>(all-MiniLM-L6-v2)
@@ -81,7 +89,7 @@ sequenceDiagram
 
     Inc->>Emb: Encode log_window
     Emb->>Idx: Query embedding (cosine similarity)
-    Idx-->>Idx: Exclude self (no leakage)
+    Note over Idx: Exclude self (no leakage)
     Idx->>Inc: Top-3 similar past incidents<br/>+ their known outcomes
     Inc->>LLM: Prompt = current incident<br/>+ retrieved precedent
     LLM->>Out: {is_anomaly, severity,<br/>root_cause, remediation}
@@ -94,16 +102,20 @@ sequenceDiagram
 ### 3. Multi-Dataset Normalization
 
 ```mermaid
+%%{init: {'theme': 'base', 'themeVariables': { 'lineColor': '#ffffff', 'edgeLabelBackground': '#2d2d2d', 'textColor': '#ffffff' }}}%%
 flowchart TD
-    A1["BGL.log<br/>(supercomputer)"] --> N["Unified Schema<br/>{id, dataset, log_window,<br/>is_anomaly, category, component}"]
-    A2["HDFS.log +<br/>anomaly_label.csv<br/>(distributed FS)"] --> N
-    A3["Thunderbird.log<br/>(large cluster)"] --> N
-    A4["OpenStack.log<br/>(cloud infra)"] --> N
-    N --> B["Balanced Sampling<br/>150 incidents/dataset<br/>(50% anomaly / 50% normal)"]
-    B --> C[("data/incidents.jsonl<br/>600 total incidents")]
+    A1["BGL.log<br/>(supercomputer)"]:::source --> N["Unified Schema<br/>{id, dataset, log_window,<br/>is_anomaly, category, component}"]:::schema
+    A2["HDFS.log +<br/>anomaly_label.csv<br/>(distributed FS)"]:::source --> N
+    A3["Thunderbird.log<br/>(large cluster)"]:::source --> N
+    A4["OpenStack.log<br/>(cloud infra)"]:::source --> N
+    N --> B["Balanced Sampling<br/>150 incidents/dataset<br/>(50% anomaly / 50% normal)"]:::process
+    B --> C(["data/incidents.jsonl<br/>600 total incidents"]):::result
 
-    style N fill:#fff3cd,stroke:#333
-    style C fill:#d4edda,stroke:#333
+    classDef source fill:#1a73e8,stroke:#0d47a1,stroke-width:2px,color:#ffffff
+    classDef schema fill:#fbbc04,stroke:#e37400,stroke-width:2px,color:#000000
+    classDef process fill:#9c27b0,stroke:#4a148c,stroke-width:2px,color:#ffffff
+    classDef result fill:#43a047,stroke:#1b5e20,stroke-width:3px,color:#ffffff
+    linkStyle default stroke:#ffffff,stroke-width:2px,color:#ffffff
 ```
 
 **What this shows:** four structurally different raw log formats get parsed by dataset-specific loaders, then converge into one common schema  -  this is what lets every downstream script (benchmark, scoring, ablations) stay dataset-agnostic.
@@ -113,38 +125,51 @@ flowchart TD
 ### 4. Benchmark Execution Matrix
 
 ```mermaid
+%%{init: {'theme': 'base', 'themeVariables': { 'lineColor': '#ffffff', 'edgeLabelBackground': '#2d2d2d', 'textColor': '#ffffff' }}}%%
 flowchart TD
-    subgraph Models["Local Models (via vLLM)"]
-        M1["Llama-3.1-8B"]
-        M2["Qwen2.5-14B"]
-        M3["Mistral-Small-22B"]
-        M4["Llama-3.3-70B (AWQ 4-bit)"]
+    subgraph Models["🖥️ Local Models (via vLLM)"]
+        M1["Llama-3.1-8B"]:::model
+        M2["Qwen2.5-14B"]:::model
+        M3["Mistral-Small-22B"]:::model
+        M4["Llama-3.3-70B (AWQ 4-bit)"]:::model
     end
-    subgraph Baselines
-        B1["☁️ Cloud API<br/>GPT-4o-mini"]
-        B2["📈 DeepLog<br/>LSTM"]
+    subgraph Baselines["⚖️ Baselines"]
+        B1["☁️ Cloud API<br/>GPT-4o-mini"]:::baseline
+        B2["📈 DeepLog<br/>LSTM"]:::baseline
     end
-    subgraph Prompts["Prompt Styles"]
-        P1["Zero-shot"]
-        P2["Few-shot"]
-        P3["RAG"]
+    subgraph Prompts["💬 Prompt Styles"]
+        P1["Zero-shot"]:::prompt
+        P2["Few-shot"]:::prompt
+        P3["RAG"]:::prompt
     end
-    subgraph Datasets
-        D1["BGL"]
-        D2["HDFS"]
-        D3["Thunderbird"]
-        D4["OpenStack"]
+    subgraph Datasets["📂 Datasets"]
+        D1["BGL"]:::dataset
+        D2["HDFS"]:::dataset
+        D3["Thunderbird"]:::dataset
+        D4["OpenStack"]:::dataset
     end
-    subgraph Seeds
-        S1["Seed 1"]
-        S2["Seed 2"]
-        S3["Seed 3"]
+    subgraph Seeds["🎲 Seeds"]
+        S1["Seed 1"]:::seed
+        S2["Seed 2"]:::seed
+        S3["Seed 3"]:::seed
     end
 
-    Models --> Prompts --> Datasets --> Seeds --> R[("results/<br/>raw_results_*.csv")]
+    Models --> Prompts --> Datasets --> Seeds --> R(["results/<br/>raw_results_*.csv<br/>144 local-model runs"]):::result
     Baselines --> Datasets
 
-    style R fill:#f8d7da,stroke:#333
+    classDef model fill:#ea4335,stroke:#b31412,stroke-width:2px,color:#ffffff
+    classDef baseline fill:#757575,stroke:#212121,stroke-width:2px,color:#ffffff
+    classDef prompt fill:#9c27b0,stroke:#4a148c,stroke-width:2px,color:#ffffff
+    classDef dataset fill:#1a73e8,stroke:#0d47a1,stroke-width:2px,color:#ffffff
+    classDef seed fill:#fbbc04,stroke:#e37400,stroke-width:2px,color:#000000
+    classDef result fill:#43a047,stroke:#1b5e20,stroke-width:3px,color:#ffffff
+    linkStyle default stroke:#ffffff,stroke-width:2px,color:#ffffff
+
+    style Models fill:#fce8e6,stroke:#ea4335,stroke-width:2px,color:#000000
+    style Baselines fill:#eeeeee,stroke:#757575,stroke-width:2px,color:#000000
+    style Prompts fill:#f3e5f5,stroke:#9c27b0,stroke-width:2px,color:#000000
+    style Datasets fill:#e8f0fe,stroke:#1a73e8,stroke-width:2px,color:#000000
+    style Seeds fill:#fff8e1,stroke:#fbbc04,stroke-width:2px,color:#000000
 ```
 
 **What this shows:** the full combinatorial scope  -  4 local models × 3 prompt styles × 4 datasets × 3 seeds = **144 local-model runs**, plus baseline comparisons on top. This is what "benchmark" means here, not a single experiment.
@@ -154,18 +179,25 @@ flowchart TD
 ### 5. Scoring & Statistical Pipeline
 
 ```mermaid
+%%{init: {'theme': 'base', 'themeVariables': { 'lineColor': '#ffffff', 'edgeLabelBackground': '#2d2d2d', 'textColor': '#ffffff' }}}%%
 flowchart LR
-    A[("raw_results_*.csv<br/>(all seeds, all prompt styles)")] --> B["Group by<br/>model × dataset × prompt_style"]
-    B --> C["Compute F1, Precision,<br/>Recall, Accuracy"]
-    C --> D["Bootstrap Resampling<br/>(1000 iterations)"]
-    D --> E["95% Confidence<br/>Intervals"]
-    E --> F[("summary_metrics.csv<br/>(per dataset)")]
-    E --> G[("macro_summary.csv<br/>(averaged across datasets)")]
-    F --> H["📄 Paper Tables<br/>& Figures"]
+    A(["raw_results_*.csv<br/>(all seeds, all prompt styles)"]):::input --> B["Group by<br/>model × dataset × prompt_style"]:::process
+    B --> C["Compute F1, Precision,<br/>Recall, Accuracy"]:::compute
+    C --> D["Bootstrap Resampling<br/>(1000 iterations)"]:::bootstrap
+    D --> E["95% Confidence<br/>Intervals"]:::ci
+    E --> F(["summary_metrics.csv<br/>(per dataset)"]):::result
+    E --> G(["macro_summary.csv<br/>(averaged across datasets)"]):::result
+    F --> H["📄 Paper Tables<br/>& Figures"]:::final
     G --> H
 
-    style D fill:#fff3cd,stroke:#333
-    style H fill:#d4edda,stroke:#333
+    classDef input fill:#1a73e8,stroke:#0d47a1,stroke-width:2px,color:#ffffff
+    classDef process fill:#9c27b0,stroke:#4a148c,stroke-width:2px,color:#ffffff
+    classDef compute fill:#00acc1,stroke:#006064,stroke-width:2px,color:#ffffff
+    classDef bootstrap fill:#fbbc04,stroke:#e37400,stroke-width:2px,color:#000000
+    classDef ci fill:#ff9800,stroke:#e65100,stroke-width:2px,color:#000000
+    classDef result fill:#43a047,stroke:#1b5e20,stroke-width:2px,color:#ffffff
+    classDef final fill:#ea4335,stroke:#b31412,stroke-width:3px,color:#ffffff
+    linkStyle default stroke:#ffffff,stroke-width:2px,color:#ffffff
 ```
 
 **What this shows:** why the results are trustworthy  -  every reported F1 score comes with a bootstrap-derived confidence interval, not a single noisy number from one run.
@@ -175,14 +207,16 @@ flowchart LR
 ### 6. Research Lineage
 
 ```mermaid
+%%{init: {'theme': 'base', 'themeVariables': { 'lineColor': '#ffffff', 'edgeLabelBackground': '#2d2d2d', 'textColor': '#ffffff' }}}%%
 flowchart TD
-    T["TriShieldRAG (2026)<br/>arXiv:2607.23838<br/>Defense-in-depth for RAG<br/>knowledge corruption"] -.->|"paper structure &<br/>retrieval-scoring principles"| L["LogSentinel-RAG (2026)<br/>this project<br/>On-prem LLM benchmark<br/>for AIOps RCA"]
-    DL["DeepLog (2017)<br/>Du et al.<br/>LSTM log anomaly detection"] -.->|"classical baseline"| L
-    LH["LogHub<br/>Zhu et al.<br/>Log dataset collection"] -.->|"dataset source"| L
-    VL["vLLM (2023)<br/>Kwon et al.<br/>PagedAttention serving"] -.->|"inference engine"| L
+    T["TriShieldRAG (2026)<br/>arXiv:2607.23838<br/>Defense-in-depth for RAG<br/>knowledge corruption"]:::prior -.->|"paper structure &<br/>retrieval-scoring principles"| L["LogSentinel-RAG (2026)<br/>this project<br/>On-prem LLM benchmark<br/>for AIOps RCA"]:::thiswork
+    DL["DeepLog (2017)<br/>Du et al.<br/>LSTM log anomaly detection"]:::prior -.->|"classical baseline"| L
+    LH["LogHub<br/>Zhu et al.<br/>Log dataset collection"]:::prior -.->|"dataset source"| L
+    VL["vLLM (2023)<br/>Kwon et al.<br/>PagedAttention serving"]:::prior -.->|"inference engine"| L
 
-    style L fill:#d4edda,stroke:#333,stroke-width:2px
-    style T fill:#e8f0fe,stroke:#333
+    classDef prior fill:#1a73e8,stroke:#0d47a1,stroke-width:2px,color:#ffffff
+    classDef thiswork fill:#43a047,stroke:#1b5e20,stroke-width:3px,color:#ffffff
+    linkStyle default stroke:#ffffff,stroke-width:2px,color:#ffffff
 ```
 
 **What this shows:** LogSentinel-RAG is original in its combination and application (on-prem AIOps RCA), while drawing on established prior work for structure (TriShieldRAG), baseline comparison (DeepLog), data (LogHub), and infrastructure (vLLM)  -  see [What This Builds On](#-what-this-builds-on) for details.
