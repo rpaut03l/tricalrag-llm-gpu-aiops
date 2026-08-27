@@ -61,7 +61,7 @@ hf auth whoami
 
 ## PHASE 2 — Get the 4 Datasets
 
-**Status: 🔄 next up**
+**Status: ✅ DONE — verified real output: 600 incidents, 150 per dataset (BGL, HDFS, Thunderbird, OpenStack)**
 
 ```bash
 cd ~/logsentinel-rag-llm-gpu-aiops
