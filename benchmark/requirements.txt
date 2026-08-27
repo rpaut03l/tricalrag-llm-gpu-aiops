@@ -1,0 +1,8 @@
+vllm>=0.6.0
+pandas
+huggingface_hub
+tqdm
+scikit-learn
+matplotlib
+sentence-transformers
+faiss-cpu

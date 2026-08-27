@@ -1,0 +1,157 @@
+\documentclass[10pt,conference]{IEEEtran}
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{graphicx}
+\usepackage{textcomp}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{hyperref}
+
+\begin{document}
+
+\title{LogSentinel-RAG: A Retrieval-Augmented Benchmark for On-Premise LLM-Based Root Cause Analysis in AIOps}
+
+\author{
+\IEEEauthorblockN{Your Name}
+\IEEEauthorblockA{Your Affiliation \\ your.email@example.com}
+}
+
+\maketitle
+
+\begin{abstract}
+Cloud-hosted large language models (LLMs) are increasingly used for root
+cause analysis (RCA) in AIOps pipelines, but they introduce data privacy
+risk, network latency, and per-query cost that scale poorly with production
+log volumes. We present LogSentinel, a benchmark evaluating open-weight
+LLMs served locally via vLLM on a single high-memory workstation GPU
+(NVIDIA RTX PRO 6000, 96GB) against a cloud API baseline and a classical
+LSTM-based log anomaly detector (DeepLog), across four real, publicly
+available log datasets (BGL, HDFS, Thunderbird, OpenStack). We report
+accuracy, precision/recall, and F1 with bootstrap 95\% confidence
+intervals across 3 random seeds, alongside throughput and VRAM footprint
+for models ranging from 8B to 70B (4-bit quantized) parameters. We further
+ablate prompt style (zero-shot vs. few-shot) and batch size scaling on a
+single GPU. Our results show [FILL IN YOUR TOP-LINE FINDING]. We release
+our benchmark harness, dataset splits, and evaluation code to support
+reproducible on-premise AIOps research.
+\end{abstract}
+
+\begin{IEEEkeywords}
+AIOps, Large Language Models, Root Cause Analysis, Benchmark, GPU Inference, Log Anomaly Detection
+\end{IEEEkeywords}
+
+\section{Introduction}
+% Motivate: cost/privacy/latency of cloud LLM APIs for AIOps.
+% Contributions, stated as a numbered list:
+% (1) LogSentinel: a 4-dataset, 6-system benchmark for on-prem LLM-based RCA
+% (2) Statistically rigorous evaluation (3 seeds, bootstrap CI)
+% (3) Ablations on prompt style, batch size scaling, and quantization
+% (4) Public release of harness + dataset splits for reproducibility
+
+\section{Related Work}
+\subsection{Log Anomaly Detection}
+% Cite DeepLog (Du et al. 2017), LogAnomaly, Loglizer survey, LogHub.
+\subsection{LLMs for AIOps and SRE}
+% Cite recent LLM-for-log-analysis / LLM-for-SRE papers (search arXiv 2024-2026).
+\subsection{LLM Serving Systems}
+% Cite vLLM~\cite{vllm2023}.
+\subsection{Retrieval-Augmented Generation}
+Our RAG component for RCA is informed by our prior work on RAG pipeline
+robustness, TriShieldRAG~\cite{rohitpatel2026trishieldrag}, which addresses
+knowledge-corruption risks in retrieval-augmented systems; while that work
+targets adversarial robustness rather than RCA, its retrieval-scoring
+principles inform how we weight retrieved incident precedent in this
+benchmark.
+
+\section{LogSentinel Benchmark Design}
+\subsection{Task Definition}
+% Define the incident window, the RCA output schema (is_anomaly, severity, root_cause, remediation).
+\subsection{Datasets}
+% Table listing BGL, HDFS, Thunderbird, OpenStack: size, domain, label source.
+\subsection{Systems Evaluated}
+% 4 local models + cloud API baseline + DeepLog baseline (Figure 2).
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth]{figures/pipeline_architecture.png}
+\caption{LogSentinel pipeline: multi-dataset ingestion, unified incident windowing, local LLM inference via vLLM, structured RCA output, and bootstrap-CI scoring against baselines.}
+\label{fig:pipeline}
+\end{figure}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth]{figures/benchmark_scope.png}
+\caption{Benchmark scope: 4 local open-weight models and 2 baselines, each evaluated across all 4 datasets.}
+\label{fig:scope}
+\end{figure}
+
+\section{Experimental Setup}
+\subsection{Hardware}
+All local-model experiments were run on a single workstation equipped with
+an NVIDIA RTX PRO 6000 (96GB VRAM), serving models via vLLM~\cite{vllm2023}.
+
+\subsection{Statistical Methodology}
+Each configuration (model $\times$ dataset $\times$ prompt style) was run
+across 3 random data-sampling seeds. We report bootstrap 95\% confidence
+intervals (1000 resamples) on F1 scores.
+
+\section{Results}
+\subsection{Main Results}
+% Insert results/macro_summary.csv (macro-averaged across datasets) as Table I.
+% Insert results/summary_metrics.csv (per-dataset breakdown) as Table II.
+
+\begin{table}[t]
+\centering
+\caption{Macro-averaged results across all 4 datasets (mean $\pm$ 95\% CI over 3 seeds)}
+\label{tab:main-results}
+\begin{tabular}{lccc}
+\toprule
+System & F1 & Tok/s & VRAM (GB) \\
+\midrule
+% Fill in from results/macro_summary.csv
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Ablation: Prompt Style}
+% zero-shot vs few-shot comparison
+
+\subsection{Ablation: Batch Size Scaling}
+% results/ablation_batch_sweep.csv -> throughput curve figure
+
+\subsection{Ablation: Quantization Impact}
+% results/ablation_quantization.csv -> FP16 vs AWQ-4bit accuracy/latency tradeoff
+
+\section{Discussion}
+% When do local models match/beat cloud API? Cost-per-1000-incidents comparison.
+% When does DeepLog outperform LLMs (e.g. pure sequence anomalies) vs. when
+% LLM's natural-language RCA explanation adds unique value DeepLog cannot provide.
+
+\section{Limitations}
+% Sample size per dataset (150 incidents x 4 = 600 total), LLM-as-judge or
+% manual scoring caveats for root_cause quality (F1 only captures binary
+% anomaly detection, not explanation quality), single-GPU-type scope.
+
+\section{Conclusion and Future Work}
+% Summarize; propose live production deployment study, additional datasets,
+% and instruction-tuning a model specifically for RCA as future work.
+%
+% A preliminary, synthetic-data feasibility exploration into extending
+% attribution beyond the application layer -- to hardware telemetry
+% (GPU/BMC sensors) and further to boot-trust (Secure Boot/TPM
+% attestation) and bare-metal provisioning/orchestration signals -- is
+% documented in the project repository's extensions/ directory. These
+% are explicitly NOT validated results (no public dataset pairs real
+% telemetry at these layers with labeled incidents at scale) and are
+% presented only as a concrete direction for follow-up work once
+% validated on real infrastructure, ideally collected via standard
+% observability tooling (e.g. OpenTelemetry) rather than ad hoc collectors.
+
+\section*{Reproducibility}
+Code, dataset splits, and evaluation harness are publicly available at:
+\url{https://github.com/rpaut03l/logsentinel-rag-llm-gpu-aiops}
+
+\bibliographystyle{IEEEtran}
+\bibliography{references}
+
+\end{document}
