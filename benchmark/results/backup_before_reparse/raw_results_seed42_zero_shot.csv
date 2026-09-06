@@ -1,0 +1,1 @@
+model,dataset,seed,prompt_style,incident_id,ground_truth_is_anomaly,ground_truth_category,pred_is_anomaly,pred_severity,pred_root_cause,raw_output,latency_total_s,tokens_per_sec,peak_vram_mb

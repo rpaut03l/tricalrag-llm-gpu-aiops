@@ -5,4 +5,5 @@ loghub/
 benchmark/data/
 __pycache__/
 *.pyc
-benchmark/results/
+# benchmark/results/
+benchmark/results/backup_before_reparse/
