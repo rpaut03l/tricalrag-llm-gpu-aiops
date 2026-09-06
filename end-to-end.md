@@ -125,7 +125,7 @@ Clean 150/dataset balanced split, no errors — BGL's real format matched the pa
 
 ## PHASE 3 — Run the Main Benchmark (3 seeds × 3 prompt styles)
 
-**Status: 🔄 IN PROGRESS — single-model pipeline validated successfully, scaling to full sweep next**
+**Status: 🔄 IN PROGRESS — pipeline validated, full multi-hour sweep running in `screen` session `logsentinel-sweep`**
 
 **Validation run confirmed** (Qwen2.5-14B, seed 1, zero-shot, all 600 incidents):
 ```
@@ -134,34 +134,60 @@ Done -> results/raw_results_seed1_zero_shot.csv
 ```
 Model load + torch.compile + CUDA graph capture: ~40s (with weights cache warm). Full inference pass: 44.3s. **Total wall time per model per seed/style combo: under 90 seconds** once the FlashInfer fix (see Phase 0) is applied and weights are cached locally.
 
-**MODELS list in `benchmark.py` currently has only 1 model active** (temporarily reduced for validation) — restore the full list before the real sweep:
+**Llama-3.1-8B access status: still pending Meta's manual gated-repo approval** (confirmed via direct `hf_hub_download` test, not just `model_info` — the latter only reads public metadata and does NOT confirm actual file-download access even on gated repos). Submitted the license form; approval can take hours to days. **Do not block the sweep waiting on this** — run with the 2 confirmed-accessible models now, add Llama back into `MODELS` and re-run once approved.
+
+**Current `MODELS` list in `benchmark.py`:**
 ```python
 MODELS = [
-    {"name": "llama3.1-8b",   "hf_id": "meta-llama/Llama-3.1-8B-Instruct"},   # pending Meta license approval — see Phase 0
-    {"name": "qwen2.5-14b",   "hf_id": "Qwen/Qwen2.5-14B-Instruct"},          # confirmed working
-    {"name": "mistral-small", "hf_id": "mistralai/Mistral-Small-Instruct-2409"},
-    {"name": "llama3.3-70b-awq", "hf_id": "hugging-quants/Meta-Llama-3.3-70B-Instruct-AWQ-INT4"},
+#    {"name": "llama3.1-8b",   "hf_id": "meta-llama/Llama-3.1-8B-Instruct"},   # PENDING Meta approval
+     {"name": "qwen2.5-14b",   "hf_id": "Qwen/Qwen2.5-14B-Instruct"},          # confirmed working
+     {"name": "mistral-small", "hf_id": "mistralai/Mistral-Small-Instruct-2409"},  # no gating, added this run
+#    {"name": "llama3.3-70b-awq", "hf_id": "hugging-quants/Meta-Llama-3.3-70B-Instruct-AWQ-INT4"},  # add after 2-model sweep confirmed clean
 ]
 ```
 
-**Ensure the FlashInfer fix is active before running** (should already be in `~/.bashrc`, confirm with a fresh shell or re-export):
+### Running the full sweep in `screen` (survives SSH disconnects)
+
 ```bash
-export VLLM_USE_FLASHINFER_SAMPLER=0
+which screen || sudo apt install -y screen
+screen -S logsentinel-sweep
 ```
 
-**Full sweep:**
+Inside the new screen session:
 ```bash
+cd ~/logsentinel-rag-llm-gpu-aiops/benchmark
+source ../logsentinel-env/bin/activate
+export VLLM_USE_FLASHINFER_SAMPLER=0
+
 for seed in 1 2 3; do
   python benchmark.py --seed $seed --prompt-style zero_shot
   python benchmark.py --seed $seed --prompt-style few_shot
   python benchmark.py --seed $seed --prompt-style rag
-done
+done 2>&1 | tee sweep_log_$(date +%Y%m%d_%H%M).txt
 ```
-Monitor VRAM in a second terminal: `watch -n 1 nvidia-smi`
 
-If the 70B model hits VRAM limits, comment it out of `MODELS` and run it alone afterward with `gpu_memory_utilization=0.95`.
+**Detach** (leaves it running): `Ctrl+A`, then `D`
 
-**At ~90s per model per seed/style combo** (based on the confirmed Qwen 14B timing — larger models like the 70B will be slower), the full 4-model × 3-seed × 3-style sweep is roughly 36 runs. Rough estimate: 36 × ~2-3 min average (accounting for larger/slower models) ≈ **1.5–2.5 hours total**, plus one-time download time for any model not yet cached locally (Mistral-Small and Llama-3.3-70B-AWQ haven't been downloaded yet).
+**Reattach later to check progress:**
+```bash
+screen -r logsentinel-sweep
+```
+
+**Check progress without reattaching:**
+```bash
+tail -20 ~/logsentinel-rag-llm-gpu-aiops/benchmark/sweep_log_*.txt
+```
+
+**Confirm the session is still alive:**
+```bash
+screen -ls
+```
+
+**Watch VRAM in a separate terminal/screen window:** `watch -n 1 nvidia-smi`
+
+If the 70B model (once enabled) hits VRAM limits, comment it out of `MODELS` and run it alone afterward with `gpu_memory_utilization=0.95`.
+
+**Timing estimate**: 2 models × 3 seeds × 3 styles = 18 runs. At ~90s per run (confirmed Qwen timing; Mistral may run somewhat slower) plus a one-time Mistral-Small download (~44GB, not yet cached — could take 10-20+ min depending on connection speed), expect roughly **30–60 minutes** for this 2-model sweep. Once Llama access clears and/or the 70B is added, re-run with the full 4-model list — that full sweep will take longer (~1.5–2.5 hours), primarily driven by the 70B's larger size.
 
 ## PHASE 4 — Score with Bootstrap CI
 
