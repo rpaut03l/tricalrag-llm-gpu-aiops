@@ -39,7 +39,7 @@ This is a **benchmark**, not a single experiment: it's built on real, public dat
 ## 🧩 What This Builds On
 
 - **Original to this project**: the benchmark design, RAG-for-RCA application, multi-dataset + multi-baseline harness, and single-GPU-workstation framing.
-- **[TriShieldRAG](https://arxiv.org/abs/2607.23838)** *(Mohanty, Patel, Yuvaraj, Chaudhary, Singhania, 2026)*  -  our own prior work on defense-in-depth for RAG pipelines; referenced here for paper structure and presentation style. See [Citation](#-citation) below.
+- **[TriShieldRAG](https://arxiv.org/abs/2607.23838)** *(Susil Mohanty, Rohit Patel, Yuvaraj, Jeenal Chaudhary, Disha Singhania, 2026)*  -  our own prior work on defense-in-depth for RAG pipelines; referenced here for paper structure and presentation style. See [Citation](#-citation) below.
 - **[DeepLog](https://dl.acm.org/doi/10.1145/3133956.3134015)** *(Du et al., 2017)*  -  the classical LSTM-based log anomaly baseline this benchmark compares against.
 - **[LogHub](https://github.com/logpai/loghub)**  -  source of all four real-world log datasets.
 - **[vLLM](https://github.com/vllm-project/vllm)**  -  the inference serving engine powering every local model run.
