@@ -26,7 +26,7 @@ from retrieval import IncidentRetriever, build_retrieval_context
 MODELS = [
 #    {"name": "llama3.1-8b",   "hf_id": "meta-llama/Llama-3.1-8B-Instruct"},
      {"name": "qwen2.5-14b",   "hf_id": "Qwen/Qwen2.5-14B-Instruct"},
-#    {"name": "mistral-small", "hf_id": "mistralai/Mistral-Small-Instruct-2409"},
+     {"name": "mistral-small", "hf_id": "mistralai/Mistral-Small-Instruct-2409"},
 #    {"name": "llama3.3-70b-awq", "hf_id": "hugging-quants/Meta-Llama-3.3-70B-Instruct-AWQ-INT4"},
 ]
 
@@ -57,7 +57,7 @@ def load_incidents(path):
 def run_model(model_cfg, incidents, writer, prompt_style, seed, retriever=None):
     print(f"\n=== {model_cfg['name']} | prompt={prompt_style} | seed={seed} ===")
     llm = LLM(model=model_cfg["hf_id"], dtype="auto",
-              gpu_memory_utilization=0.85, max_model_len=4096)
+              gpu_memory_utilization=0.85, max_model_len=8192)
     sampling_params = SamplingParams(temperature=0.0, max_tokens=MAX_TOKENS)
 
     if prompt_style == "rag":
