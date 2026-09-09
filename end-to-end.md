@@ -1,4 +1,4 @@
-# LogSentinel-RAG — End-to-End: Setup → Benchmark → Paper → arXiv
+# TriCalRAG — End-to-End: Setup → Benchmark → Paper → arXiv
 
 **Status log:** this file is the living record of what's actually been done vs. what's next. Update it as each phase completes — don't let it drift out of sync with reality (an earlier version of this file predated the repo's actual structure; this rewrite fixes that).
 
@@ -29,12 +29,12 @@ nvidia-smi --query-gpu=compute_cap --format=csv
 
 ## PHASE 1 — Clone + Environment Setup
 
-**Status: ✅ done**
+**Status: done**
 
 ```bash
 cd ~
-git clone git@github.com:rpaut03l/logsentinel-rag-llm-gpu-aiops.git
-cd logsentinel-rag-llm-gpu-aiops
+git clone git@github.com:rpaut03l/tricalrag-llm-gpu-aiops.git
+cd tricalrag-llm-gpu-aiops
 pwd && ls -la
 ```
 
@@ -68,12 +68,12 @@ hf auth whoami
 
 ## PHASE 2 — Get the 4 Datasets
 
-**Status: ✅ done — real datasets downloaded and verified on the GPU machine**
+**Status: done — real datasets downloaded and verified on the GPU machine**
 
 The public `git clone https://github.com/logpai/loghub.git` only ships 2,000-line **demo samples**, not the full datasets — each dataset's README circularly points back at the GitHub repo itself. The real full datasets live on **Zenodo (record 8196385)**, freely downloadable with no login or approval process:
 
 ```bash
-cd ~/logsentinel-rag-llm-gpu-aiops
+cd ~/tricalrag-llm-gpu-aiops
 git clone https://github.com/logpai/loghub.git   # gives 2k demo samples only, kept for reference/quick pipeline tests
 mkdir -p loghub/full_datasets && cd loghub/full_datasets
 
@@ -88,7 +88,7 @@ tar -xzf OpenStack.tar.gz -C .
 tar -xzf Thunderbird.tar.gz -C .
 ```
 
-**⚠️ Real extracted structure (verified on this machine — do not assume LogHub's naming is consistent across datasets):**
+**Real extracted structure (verified on this machine — do not assume LogHub's naming is consistent across datasets):**
 ```
 loghub/full_datasets/BGL/BGL.log                              (743 MB, single file, matches expected space-separated format)
 loghub/full_datasets/HDFS/HDFS.log                             (1.6 GB)
@@ -100,22 +100,22 @@ loghub/full_datasets/anomaly_labels.txt                        (lists VM instanc
 loghub/full_datasets/Thunderbird.log                           (31.7 GB — DO NOT load directly, see below)
 ```
 
-**⚠️ Thunderbird is 31.7GB — do not load the full file.** Our loader uses `readlines()`, which would try to pull the entire file into RAM. Create a bounded subset instead:
+**Thunderbird is 31.7GB — do not load the full file.** Our loader uses `readlines()`, which would try to pull the entire file into RAM. Create a bounded subset instead:
 ```bash
 head -n 2000000 Thunderbird.log > Thunderbird_subset.log
 ```
 This gives ~257MB (2M lines) — manageable, and still large enough for a representative anomaly/normal mix.
 
-**⚠️ OpenStack is NOT one combined log with inline anomaly markers** (our original loader assumed this — it was wrong). The real format is three separate files: `openstack_normal1.log` and `openstack_normal2.log` (no anomalies), and `openstack_abnormal.log` (contains injected anomalies tied to 4 specific VM instance UUIDs listed in `anomaly_labels.txt`). Fixed in `multi_dataset_loader.py`: `parse_openstack()` now takes three file paths and labels all abnormal-file lines as anomalous, all normal-file lines as normal.
+**OpenStack is NOT one combined log with inline anomaly markers** (our original loader assumed this — it was wrong). The real format is three separate files: `openstack_normal1.log` and `openstack_normal2.log` (no anomalies), and `openstack_abnormal.log` (contains injected anomalies tied to 4 specific VM instance UUIDs listed in `anomaly_labels.txt`). Fixed in `multi_dataset_loader.py`: `parse_openstack()` now takes three file paths and labels all abnormal-file lines as anomalous, all normal-file lines as normal.
 
 **`multi_dataset_loader.py` has been updated** with a corrected `parse_openstack()` function and real verified paths for all four datasets (see the `config` dict in `if __name__ == "__main__"`). Confirm your extracted paths match before running — if `full_datasets/` ends up structured differently on a re-download, update the config dict accordingly rather than assuming this layout is guaranteed by LogHub.
 
 ```bash
-cd ~/logsentinel-rag-llm-gpu-aiops/benchmark
+cd ~/tricalrag-llm-gpu-aiops/benchmark
 python loaders/multi_dataset_loader.py --seed 42 --out data/incidents.jsonl
 ```
 
-**✅ Confirmed working on the GPU machine** — output:
+**Confirmed working on the GPU machine** — output:
 ```
 Wrote 600 incidents to data/incidents.jsonl
 Per-dataset breakdown: {'bgl': 150, 'hdfs': 150, 'thunderbird': 150, 'openstack': 150}
@@ -125,7 +125,26 @@ Clean 150/dataset balanced split, no errors — BGL's real format matched the pa
 
 ## PHASE 3 — Run the Main Benchmark (3 seeds × 3 prompt styles)
 
-**Status: 🔄 IN PROGRESS — pipeline validated, full multi-hour sweep running in `screen` session `logsentinel-sweep`**
+**Status: done (2-model sweep) — all 9 seed×style combos complete for Qwen2.5-14B + Mistral-Small (1201 lines each, 2 models × 600 incidents + header). Llama-3.1-8B and the 70B model still pending (see below).**
+
+**Bug hit and fixed during this run**: RAG prompts (which inject 3 retrieved past incidents as context) overflowed the original `max_model_len=4096` — retrieved context pushed some prompts to 4097+ tokens. All 3 RAG runs (seeds 1/2/3) failed identically with `VLLMValidationError: maximum context length is 4096 tokens`, while zero-shot and few-shot (no retrieval context) completed fine. **Fix**: bumped `max_model_len=4096` → `max_model_len=8192` in `benchmark.py`. Re-ran only the 3 broken RAG files (deleted the header-only stubs first so the smart-resume loop didn't skip them) — all completed successfully after the fix.
+
+**Confirmed timing** (Mistral-Small, seed 3, RAG, post-fix): 600 incidents in 273.7s (131.7 tok/s) — notably slower than zero-shot/few-shot (~45s) because RAG prompts are much longer (retrieved context adds significant token count per request). **RAG runs take ~4-5 min per model**, not ~90s like the other two styles — factor this into future timing estimates.
+
+**Smart-resume pattern used** (safe to reuse for the remaining Llama/70B runs later):
+```bash
+for seed in 1 2 3; do
+  for style in zero_shot few_shot rag; do
+    outfile="results/raw_results_seed${seed}_${style}.csv"
+    if [ -f "$outfile" ]; then
+      echo "SKIP: $outfile already exists"
+    else
+      python benchmark.py --seed $seed --prompt-style $style
+    fi
+  done
+done
+```
+Note: this only checks file *existence*, not completeness — always verify row counts (`wc -l results/*.csv`, expect 1201 per model added) after any resume, since a crashed run can leave a header-only stub that looks "done" to a naive existence check.
 
 **Validation run confirmed** (Qwen2.5-14B, seed 1, zero-shot, all 600 incidents):
 ```
@@ -155,7 +174,7 @@ screen -S logsentinel-sweep
 
 Inside the new screen session:
 ```bash
-cd ~/logsentinel-rag-llm-gpu-aiops/benchmark
+cd ~/tricalrag-llm-gpu-aiops/benchmark
 source ../logsentinel-env/bin/activate
 export VLLM_USE_FLASHINFER_SAMPLER=0
 
@@ -175,7 +194,7 @@ screen -r logsentinel-sweep
 
 **Check progress without reattaching:**
 ```bash
-tail -20 ~/logsentinel-rag-llm-gpu-aiops/benchmark/sweep_log_*.txt
+tail -20 ~/tricalrag-llm-gpu-aiops/benchmark/sweep_log_*.txt
 ```
 
 **Confirm the session is still alive:**
@@ -191,7 +210,7 @@ If the 70B model (once enabled) hits VRAM limits, comment it out of `MODELS` and
 
 ## PHASE 4 — Score with Bootstrap CI
 
-**Status: ⬜ not yet run**
+**Status: not started**
 
 ```bash
 python score_results.py
@@ -200,7 +219,7 @@ Produces `results/summary_metrics.csv` (per-dataset, per-model, with 95% CI) and
 
 ## PHASE 5 — Run Ablations
 
-**Status: ⬜ not yet run**
+**Status: not started**
 
 ```bash
 python ablation.py --mode batch_sweep
@@ -209,7 +228,7 @@ python ablation.py --mode quantization
 
 ## PHASE 6 — Run the DeepLog Baseline
 
-**Status: ⬜ not yet run**
+**Status: not started**
 
 ```bash
 cd ../baselines
@@ -219,13 +238,13 @@ Output lands in `../benchmark/results/deeplog_baseline.json`.
 
 ## PHASE 7 — (Optional) Cloud API Baseline
 
-**Status: ⬜ not yet built**
+**Status: not started**
 
 Add a script calling GPT-4o-mini or Claude Haiku on the same `data/incidents.jsonl` with the same prompt template, log latency + cost per call, score identically. Needed for the "local vs. cloud" comparison claim in the abstract.
 
 ## PHASE 8 — Generate Figures + Write the Paper
 
-**Status: ⬜ not yet run**
+**Status: not started**
 
 ```bash
 cd ../paper
@@ -242,11 +261,11 @@ Proofread `main.pdf` fully before moving on.
 
 ## PHASE 9 — GitHub
 
-**Status: ✅ done** — repo live at `https://github.com/rpaut03l/logsentinel-rag-llm-gpu-aiops`, restructured (core benchmark vs. `extensions/`) on `main` as of the `restructure/core-vs-extensions` PR merge.
+**Status: done** — repo live at `https://github.com/rpaut03l/tricalrag-llm-gpu-aiops`, restructured (core benchmark vs. `extensions/`) on `main` as of the `restructure/core-vs-extensions` PR merge.
 
 Once real results exist, commit them:
 ```bash
-cd ~/logsentinel-rag-llm-gpu-aiops
+cd ~/tricalrag-llm-gpu-aiops
 git checkout -b add-benchmark-results
 git add benchmark/results/ benchmark/data/incidents.jsonl paper/main.tex paper/figures/
 git commit -m "Add real benchmark results and finalized paper draft"
@@ -256,7 +275,7 @@ gh pr create --title "Add real benchmark results" --base main
 
 ## PHASE 10 — arXiv Submission
 
-**Status: ⬜ not started**
+**Status: not started**
 
 1. Register: https://arxiv.org/user/register
 2. Check endorsement need: https://arxiv.org/auth/endorse (start early — can take days)
@@ -267,7 +286,7 @@ gh pr create --title "Add real benchmark results" --base main
 
 ## PHASE 11 — Hugging Face Papers + Papers with Code
 
-**Status: ⬜ not started**
+**Status: not started**
 
 Once you have an arXiv ID:
 1. Submit to https://huggingface.co/papers/submit
@@ -276,7 +295,7 @@ Once you have an arXiv ID:
 
 ## PHASE 12 — AI-SPC 2026 Workshop Submission (parallel, optional)
 
-**Status: ⬜ not started**
+**Status: not started**
 
 - Trim to 4 pages + 1 reference page (IEEE format)
 - Confirm with chairs that arXiv preprints are acceptable given the "unpublished manuscript" clause
