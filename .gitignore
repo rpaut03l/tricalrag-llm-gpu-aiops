@@ -7,3 +7,8 @@ __pycache__/
 *.pyc
 # benchmark/results/
 benchmark/results/backup_before_reparse/
+paper/main.aux
+paper/main.bbl
+paper/main.blg
+paper/main.log
+paper/main.out
