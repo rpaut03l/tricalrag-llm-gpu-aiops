@@ -4,6 +4,8 @@
 \usepackage{graphicx}
 \usepackage{textcomp}
 \usepackage{xcolor}
+\usepackage{tikz}
+\usetikzlibrary{shapes.geometric, arrows.meta, positioning, fit, backgrounds, calc}
 \usepackage{booktabs}
 \usepackage{hyperref}
 
@@ -29,9 +31,9 @@ LLMs served locally via vLLM on a single high-memory workstation GPU
 (NVIDIA RTX PRO 6000, 96GB) against a classical LSTM-based log anomaly
 detector (DeepLog), across four real, publicly available log datasets
 (BGL, HDFS, Thunderbird, OpenStack). We evaluate two open-weight models
-(Qwen2.5-14B, Mistral-Small) under three prompting strategies - zero-shot,
+(Qwen2.5-14B, Mistral-Small) under three prompting strategies -- zero-shot,
 few-shot, and retrieval-augmented generation (RAG) over a labeled incident
-history - reporting accuracy, precision/recall, and F1 with bootstrap 95\%
+history -- reporting accuracy, precision/recall, and F1 with bootstrap 95\%
 confidence intervals across 3 random seeds, alongside throughput and VRAM
 footprint. Our results show that RAG not only improves mean F1 by 0.10-0.27
 over zero-shot prompting but, more importantly, substantially stabilizes
@@ -41,7 +43,7 @@ on some datasets), while RAG keeps predicted-positive rates close to the
 true class balance in the majority of configurations. Mistral-Small
 achieves higher macro-averaged F1 than Qwen2.5-14B (0.644 vs. 0.560) but
 exhibits calibration failures in more configurations (7 vs. 5 of 12), while
-running at roughly half the throughput - indicating the better model choice
+running at roughly half the throughput -- indicating the better model choice
 depends on whether a deployment prioritizes peak accuracy or predictable
 behavior across prompting conditions. Ablations show batching scales
 throughput 41$\times$ on a single card and that 4-bit quantization reduces
@@ -57,11 +59,19 @@ AIOps, Large Language Models, Root Cause Analysis, Benchmark, GPU Inference, Log
 \section{Introduction}
 
 Modern IT operations generate log volumes far beyond what on-call engineers
-can manually triage. AIOps tooling has consequently turned to large language
-models (LLMs) for root cause analysis (RCA): given a window of raw log
+can manually triage. AIOps tooling~\cite{dang2019aiops} has consequently
+turned to large language models (LLMs), built on the Transformer
+architecture~\cite{vaswani2017attention} and scaled through pretraining
+regimes established by GPT-style~\cite{radford2019gpt2,brown2020gpt3},
+encoder~\cite{devlin2019bert}, and text-to-text~\cite{raffel2020t5}
+language models, for root cause analysis (RCA): given a window of raw log
 lines, an LLM can not only flag that something is anomalous but explain
-\emph{why} in natural language and suggest remediation - a capability
-classical anomaly detectors, which emit only a binary flag, cannot provide.
+\emph{why} in natural language and suggest remediation -- a capability
+classical anomaly detectors~\cite{chandola2009anomaly}, which emit only a
+binary flag, cannot provide. Instruction tuning~\cite{ouyang2022instructgpt}
+and in-context prompting techniques such as chain-of-thought
+reasoning~\cite{wei2022cot} have made this natural-language RCA capability
+practical without task-specific fine-tuning.
 
 Most deployed LLM-for-RCA systems call cloud-hosted APIs. This creates
 three practical problems for operations teams. First, production logs
@@ -99,10 +109,10 @@ Our contributions are:
         per configuration with bootstrap 95\% confidence intervals on all
         reported metrics.
   \item A calibration analysis showing that F1 alone substantially
-        misrepresents model competence on this task - zero-shot
+        misrepresents model competence on this task -- zero-shot
         prompting drives both evaluated models toward near-degenerate
         behavior (predicting "anomaly" on up to 100\% of incidents) while
-        still producing moderate-looking F1 scores - and that retrieval
+        still producing moderate-looking F1 scores -- and that retrieval
         augmentation, beyond improving F1, substantially stabilizes
         calibration.
   \item Public release of the benchmark harness, dataset construction
@@ -122,15 +132,34 @@ embeddings capturing semantic similarity between log messages. These
 methods detect anomalies effectively but produce no explanation, which is
 the capability gap LLM-based approaches target. LogHub~\cite{loghub}
 provides the standard corpus of labeled real-world log datasets on which
-this line of work is evaluated, including the four we use here.
+this line of work is evaluated, including the four we use here; He et
+al.~\cite{loglizer} provide complementary tooling and benchmarks
+specifically for the log-parsing step that typically precedes anomaly
+detection. At the
+broader systems level, Soldani and Brogi~\cite{soldani2022rca} survey
+anomaly detection and root-cause analysis specifically for microservice
+and cloud applications, the operational context our benchmark targets.
 
 \subsection{LLMs for Log Analysis and RCA}
 Recent work applies LLMs across the log-analysis pipeline; Akhtar et
 al.~\cite{llmeventlogsurvey2025} survey this area broadly.
 LogGPT~\cite{loggpt2023} explores prompting a commercial LLM for log
 anomaly detection with structured JSON outputs, similar in output format
-to our task definition. LogLLM~\cite{logllm2024} investigates fine-tuned
-open-weight models for the same task. For RCA specifically, Zhang et
+to our task definition. LogLLM~\cite{logllm2024} and
+LogLM~\cite{liu2024loglm} investigate fine-tuned and instruction-tuned
+open-weight models for the same task, while LLMeLog~\cite{he2024llmelog}
+enriches log events with LLM-generated semantics prior to detection.
+ClsLog~\cite{xiao2025clslog} combines large and small models to balance
+accuracy against inference cost, and Anomaly-Gen~\cite{li2025anomalygen}
+uses an LLM to synthesize training sequences for anomaly detection rather
+than to classify directly. At the log-parsing stage upstream of anomaly
+detection, UniLog~\cite{xu2024unilog}, LogParser-LLM~\cite{zhong2024logparserllm},
+and Lilac~\cite{jiang2024lilac} apply LLMs and in-context learning to
+template extraction. For insider-threat-specific anomaly detection,
+Song et al.~\cite{song2025confront} fine-tune an LLM on behavior logs.
+For RCA specifically, Ahmed et al.~\cite{ahmed2023recommending} conduct a
+large-scale study of LLM-based root-cause and mitigation recommendation
+across more than 40{,}000 production incidents, and Zhang et
 al.~\cite{gpt4rca2024} apply in-context learning with GPT-4 to automated
 root causing of cloud incidents. These works establish that LLMs are
 viable for the task; our contribution is orthogonal, focusing on whether
@@ -138,9 +167,15 @@ the task is feasible \emph{on-premise on a single GPU} and on the
 calibration properties that aggregate accuracy metrics obscure.
 
 \subsection{Retrieval-Augmented Log Analysis}
-Closest to our RAG configuration, LogRAG~\cite{lograg2024} retrieves
+Retrieval-augmented generation was introduced by Lewis et
+al.~\cite{lewis2020rag} as a general recipe for grounding language model
+outputs in retrieved non-parametric context. Closest to our RAG
+configuration, LogRAG~\cite{lograg2024} retrieves
 semantically similar historical log templates as external context for
-LLM-based anomaly detection in a semi-supervised setting. Our RAG setup
+LLM-based anomaly detection in a semi-supervised setting, and
+EagerLog~\cite{duan2025eagerlog} combines active learning with
+retrieval-augmented generation to reduce labeling cost for the same task.
+Our RAG setup
 differs in three ways: we retrieve whole labeled \emph{incidents}
 (including their ground-truth outcome) rather than individual templates;
 we evaluate retrieval as one of three prompting strategies in a
@@ -157,7 +192,23 @@ precedent here.
 \subsection{LLM Serving Systems}
 We use vLLM~\cite{vllm2023}, whose PagedAttention memory management
 enables high-throughput batched inference on a single device, making the
-single-workstation setting we study practical.
+single-workstation setting we study practical. Complementary
+efficiency techniques not evaluated directly here -- IO-aware attention
+kernels~\cite{dao2022flashattention} and parameter-efficient
+fine-tuning~\cite{hu2022lora} -- follow a similar single-device
+efficiency motivation and could extend this benchmark's scope in future
+work, particularly as scaling behavior~\cite{kaplan2020scaling} continues
+to push open-weight model sizes upward.
+
+\subsection{General-Purpose LLM Benchmarking}
+Our evaluation protocol is informed by broader LLM benchmarking practice:
+multi-task accuracy suites such as MMLU~\cite{hendrycks2021mmlu}, holistic
+evaluation frameworks such as HELM~\cite{liang2022helm}, and
+execution-grounded software-engineering benchmarks such as
+SWE-bench~\cite{jimenez2023swebench} all establish precedent for
+reporting model behavior across multiple axes rather than a single
+leaderboard number -- the same principle underlying our calibration
+diagnostic alongside F1.
 
 \section{TriCalRAG Benchmark Design}
 
@@ -189,28 +240,182 @@ differ only in what additional context accompanies it.
 \textbf{Zero-shot} provides the instruction and the incident alone.
 \textbf{Few-shot} prepends two fixed worked examples, identical across
 all queries. \textbf{RAG} retrieves the three most similar past incidents
-by embedding cosine similarity (using \texttt{all-MiniLM-L6-v2} over a
-FAISS index built from the incident corpus) and includes them with their
+by embedding cosine similarity (using \texttt{all-MiniLM-L6-v2}, a
+Sentence-BERT model~\cite{reimers2019sbert}, over a
+FAISS index~\cite{johnson2019faiss} built from the incident corpus) and includes them with their
 ground-truth outcomes as precedent. Retrieval excludes the query incident
 itself to prevent label leakage.
 
 \subsection{Systems Evaluated}
-We evaluate two open-weight instruction-tuned models -
-Qwen2.5-14B-Instruct and Mistral-Small-Instruct (22B) - served in
+We evaluate two open-weight instruction-tuned models --
+Qwen2.5-14B-Instruct~\cite{qwen2024technical} and Mistral-Small-Instruct
+(22B)~\cite{jiang2023mistral} -- served in
 bfloat16 via vLLM, against a DeepLog-style LSTM baseline trained on
 normal sequences only.
 
-\begin{figure}[t]
+\begin{figure*}[t]
 \centering
-\includegraphics[width=0.92\textwidth]{figures/full_architecture.png}
-\caption{TriCalRAG pipeline: multi-dataset ingestion, unified incident windowing, local LLM inference via vLLM, structured RCA output, and bootstrap-CI scoring against baselines.}
+\begin{tikzpicture}[
+    font=\sffamily\small,
+    node distance=6mm and 8mm,
+    box/.style={draw, rounded corners=2pt, minimum height=8mm, align=center,
+                fill=white, draw=black!70, line width=0.6pt, font=\sffamily\footnotesize, inner sep=3pt},
+    lanehead/.style={font=\sffamily\bfseries\small, anchor=north west},
+    arr/.style={-{Latex[length=2mm,width=1.2mm]}, line width=0.5pt, draw=black!75},
+    lane1/.style={fill=black!4},
+    lane2/.style={fill=black!4},
+    lane3/.style={fill=black!8},
+    lane4/.style={fill=black!4}
+]
+
+\begin{scope}[on background layer]
+  \fill[lane1] (0,10.2) rectangle (17.6,12.6);
+  \fill[lane2] (0,6.6)  rectangle (17.6,10.2);
+  \fill[lane3] (0,3.4)  rectangle (17.6,6.6);
+  \fill[lane4] (0,0.6)  rectangle (17.6,3.4);
+\end{scope}
+
+
+
+\node[box, minimum width=22mm] (bgl)       at (2.6,11.6)  {BGL};
+\node[box, minimum width=22mm] (hdfs)      at (5.6,11.6)  {HDFS};
+\node[box, minimum width=22mm] (tbird)     at (8.6,11.6)  {Thunderbird};
+\node[box, minimum width=22mm] (openstack) at (11.6,11.6) {OpenStack};
+
+\node[box, minimum width=90mm] (loader) at (7.5,10.6)
+  {Unified loader $\rightarrow$ 600 incidents (150/dataset, balanced 50/50)};
+
+\node[box, minimum width=34mm, minimum height=11mm] (zeroshot) at (2.6,8.9)
+  {Zero-shot\\\footnotesize instruction only};
+\node[box, minimum width=34mm, minimum height=11mm] (fewshot) at (7.5,8.9)
+  {Few-shot\\\footnotesize +2 fixed examples};
+\node[box, minimum width=34mm, minimum height=11mm] (rag) at (12.4,8.9)
+  {RAG\\\footnotesize +3 retrieved incidents};
+
+\node[box, minimum width=22mm, fill=black!2, draw=black!55] (faiss) at (11.0,7.3)
+  {\footnotesize FAISS index\\\footnotesize(MiniLM-L6)};
+\node[box, minimum width=22mm, fill=black!2, draw=black!55] (top3) at (13.8,7.3)
+  {\footnotesize Top-3 similar\\\footnotesize(excl.\ self)};
+
+\node[box, minimum width=98mm, minimum height=12mm, line width=0.9pt] (vllm) at (7.5,5.0)
+  {\textbf{vLLM inference engine} \textperiodcentered\ Qwen2.5-14B $\vert$ Mistral-Small\\
+   single NVIDIA RTX PRO 6000 (96GB VRAM)};
+
+\node[box, minimum width=42mm, minimum height=12mm] (output) at (15.0,5.0)
+  {\footnotesize Structured output (JSON)\\\footnotesize \texttt{is\_anomaly} \textperiodcentered\ \texttt{severity}\\\footnotesize \texttt{root\_cause} \textperiodcentered\ \texttt{remediation}};
+
+\node[box, minimum width=52mm, minimum height=11mm] (deeplog) at (3.2,1.9)
+  {DeepLog (LSTM) baseline\\\footnotesize train/test split, no leakage};
+
+\node[box, minimum width=58mm, minimum height=13mm] (score) at (14.0,1.9)
+  {Bootstrap 95\% CI \textperiodcentered\ F1 / Precision / Recall\\
+   \footnotesize + calibration diagnostic (3 seeds $\times$ 3 styles)};
+
+\draw[arr] (bgl.south)       -- (loader.north);
+\draw[arr] (hdfs.south)      -- (loader.north);
+\draw[arr] (tbird.south)     -- (loader.north);
+\draw[arr] (openstack.south) -- (loader.north);
+
+\draw[arr] (loader.south) -- (zeroshot.north);
+\draw[arr] (loader.south) -- (fewshot.north);
+\draw[arr] (loader.south) -- (rag.north);
+
+% RAG retrieval sub-flow: strictly orthogonal step connectors,
+% offset entry/exit points on RAG's bottom edge so they don't collide
+% with the straight drop from RAG down to the inference engine.
+\coordinate (ragOutL) at ($(rag.south)+(-0.6,0)$);
+\coordinate (ragInR)  at ($(rag.south)+(0.6,0)$);
+\draw[arr] (ragOutL) -- ++(0,-0.3) -| (faiss.north);
+\draw[arr] (faiss.east) -- (top3.west);
+\draw[arr] (top3.north) -- ++(0,0.3) -| (ragInR);
+
+% Strategy boxes -> inference engine: pure vertical drops.
+% vLLM box is centered/sized so its edges land exactly under
+% zero-shot and RAG, and its center lands exactly under few-shot.
+\coordinate (vTop1) at ($(vllm.north)+(-4.9,0)$);
+\coordinate (vTop2) at (vllm.north);
+\coordinate (vTop3) at ($(vllm.north)+(4.9,0)$);
+\draw[arr] (zeroshot.south) -- (vTop1);
+\draw[arr] (fewshot.south)  -- (vTop2);
+\draw[arr] (rag.south)      -- (vTop3);
+
+\draw[arr] (vllm.east) -- (output.west);
+\draw[arr] (output.south) -- ++(0,-0.3) -| (score.north);
+\draw[arr] (deeplog.east) -- (score.west);
+
+% Lane labels drawn LAST, with an opaque backing patch matching each
+% lane's own background color, so they sit cleanly on top of any arrow
+% that happens to cross the same horizontal band instead of the arrow
+% line rendering through the label text.
+\node[lanehead, fill=black!4, inner sep=1.5pt] at (0.15,12.45) {1 \ \textperiodcentered\ DATA};
+\node[lanehead, fill=black!4, inner sep=1.5pt] at (0.15,10.05) {2 \ \textperiodcentered\ PROMPTING STRATEGY};
+\node[lanehead, fill=black!8, inner sep=1.5pt] at (0.15,6.45)  {3 \ \textperiodcentered\ ON-PREMISE INFERENCE};
+\node[lanehead, fill=black!4, inner sep=1.5pt] at (0.15,3.25)  {4 \ \textperiodcentered\ EVALUATION};
+
+\end{tikzpicture}
+\caption{TriCalRAG end-to-end architecture. Four LogHub datasets are normalized by a unified loader into 600 balanced incidents. Each incident is presented to the LLM under one of three prompting strategies -- zero-shot, few-shot (fixed examples), or RAG (retrieving the top-3 most similar past incidents via a FAISS index over sentence embeddings, excluding the query itself). All strategies converge on a single vLLM inference engine serving Qwen2.5-14B and Mistral-Small on one RTX PRO 6000. Model output is a structured JSON object, scored with bootstrap 95\% confidence intervals and a calibration diagnostic, alongside a leakage-corrected DeepLog baseline trained independently on the same incident pool.}
 \label{fig:pipeline}
-\end{figure}
+\end{figure*}
 
 \begin{figure}[t]
 \centering
-\includegraphics[width=\columnwidth]{figures/benchmark_scope.png}
-\caption{Benchmark scope: 4 local open-weight models and 2 baselines, each evaluated across all 4 datasets.}
+\resizebox{\columnwidth}{!}{%
+\begin{tikzpicture}[
+    font=\sffamily\footnotesize,
+    cell/.style={draw, minimum width=13mm, minimum height=7mm, align=center, line width=0.5pt},
+    rowlabel/.style={font=\sffamily\footnotesize, anchor=east},
+    collabel/.style={font=\sffamily\bfseries\scriptsize, align=center}
+]
+
+% Column headers
+\node[collabel] at (2.6,0)  {BGL};
+\node[collabel] at (2.6+1.7,0) {HDFS};
+\node[collabel] at (2.6+3.4,0) {Thunderbird};
+\node[collabel] at (2.6+5.1,0) {OpenStack};
+
+% Row labels
+\node[rowlabel] at (0,-0.9)  {Qwen2.5-14B};
+\node[rowlabel] at (0,-1.7)  {Mistral-Small-22B};
+\node[rowlabel] at (0,-2.5)  {Llama-3.1-8B};
+\node[rowlabel] at (0,-3.3)  {Llama-3.3-70B-AWQ};
+\node[rowlabel] at (0,-4.1)  {Cloud API (GPT-4o-mini)};
+\node[rowlabel] at (0,-4.9)  {DeepLog (LSTM)};
+
+% Row 1: Qwen2.5-14B -- COMPLETE (this paper's core results)
+\foreach \x/\lbl in {0/1,1/2,2/3,3/4} {
+  \node[cell, fill=green!12, draw=green!45!black] at (2.6+\x*1.7,-0.9) {\checkmark};
+}
+% Row 2: Mistral-Small -- COMPLETE
+\foreach \x in {0,1,2,3} {
+  \node[cell, fill=green!12, draw=green!45!black] at (2.6+\x*1.7,-1.7) {\checkmark};
+}
+% Row 3: Llama-3.1-8B -- PLANNED (gated-repo access pending, Sec. VII)
+\foreach \x in {0,1,2,3} {
+  \node[cell, fill=black!4, draw=black!35] at (2.6+\x*1.7,-2.5) {--};
+}
+% Row 4: Llama-3.3-70B-AWQ -- PLANNED
+\foreach \x in {0,1,2,3} {
+  \node[cell, fill=black!4, draw=black!35] at (2.6+\x*1.7,-3.3) {--};
+}
+% Row 5: Cloud API -- PLANNED
+\foreach \x in {0,1,2,3} {
+  \node[cell, fill=red!6, draw=red!35!black] at (2.6+\x*1.7,-4.1) {--};
+}
+% Row 6: DeepLog -- COMPLETE (baseline, Sec. VI-A)
+\foreach \x in {0,1,2,3} {
+  \node[cell, fill=red!10, draw=red!45!black] at (2.6+\x*1.7,-4.9) {\checkmark};
+}
+
+% Legend
+\node[font=\sffamily\scriptsize] at (3.4,-5.7)
+  {\checkmark\ = results reported in this paper \quad -- = planned (Sec.~VII)};
+\node[font=\sffamily\scriptsize] at (3.4,-6.15)
+  {\textcolor{green!45!black}{\rule{2mm}{2mm}} local open-weight model \quad
+   \textcolor{red!45!black}{\rule{2mm}{2mm}} baseline};
+
+\end{tikzpicture}%
+}
+\caption{Benchmark scope. Qwen2.5-14B, Mistral-Small, and the DeepLog baseline are fully evaluated across all four datasets with results reported in Sections V--VI. Llama-3.1-8B, a 70B-class quantized model, and a cloud API baseline were part of the intended design but are not yet evaluated (Section~VII), shown here for scope transparency rather than as completed results.}
 \label{fig:scope}
 \end{figure}
 
@@ -221,7 +426,7 @@ an NVIDIA RTX PRO 6000 (96GB VRAM), serving models via vLLM~\cite{vllm2023}.
 
 \subsection{Statistical Methodology}
 Each configuration (model $\times$ dataset $\times$ prompt style) was run
-across 3 random data-sampling seeds. We report bootstrap 95\% confidence
+across 3 random data-sampling seeds. We report bootstrap~\cite{efron1979bootstrap} 95\% confidence
 intervals (1000 resamples) on F1 scores.
 
 \section{Results}
@@ -282,8 +487,12 @@ misaligning the evaluation unit with the true anomaly unit.
 \subsection{Calibration Analysis}
 \label{sec:calibration}
 
-Beyond raw F1, we report each configuration's predicted-positive rate -
-the fraction of incidents a model labels "anomaly" - since our datasets
+Neural classifiers are known to produce overconfident, poorly calibrated
+predictions~\cite{guo2017calibration}; we adapt this concern to a
+generative, structured-output setting where the analogous failure is a
+skewed predicted-class distribution rather than a miscalibrated softmax.
+Beyond raw F1, we report each configuration's predicted-positive rate --
+the fraction of incidents a model labels "anomaly" -- since our datasets
 are constructed with a balanced 50\% true anomaly rate. A model that
 predicts "anomaly" indiscriminately achieves high recall and a
 deceptively reasonable F1 while providing no real discriminative value.
@@ -309,7 +518,11 @@ suggesting the fixed few-shot examples bias the model toward the specific
 examples shown rather than generalizing to the task.
 
 \subsection{Ablation: Prompt Style}
-% See calibration analysis above; add batch-size/quantization ablations here once run.
+The effect of prompt style itself is reported in Section~\ref{sec:calibration}
+and Figure~\ref{fig:results} above, since it is the primary variable of
+the benchmark rather than a supplementary ablation; the two ablations
+below hold prompt style fixed to isolate deployment-relevant variables
+(batch size, quantization) instead.
 
 \subsection{Ablation: Batch Size Scaling}
 
@@ -317,7 +530,7 @@ A central practical question for single-GPU deployment is how far batching
 alone can push throughput before hardware limits bind.
 Table~\ref{tab:batch-sweep} reports Qwen2.5-14B throughput across batch
 sizes on the RTX PRO 6000. Throughput scales from 48.3 tokens/s at batch
-size 1 to 1991.0 tokens/s at batch size 128 - a 41$\times$ improvement -
+size 1 to 1991.0 tokens/s at batch size 128 -- a 41$\times$ improvement --
 while total wall-clock time for the batch grows only from 1.39s to 4.14s,
 since the card's 96GB of VRAM leaves ample room for KV cache at these
 concurrency levels (vLLM reported approximately 50GB available for KV
@@ -345,10 +558,14 @@ Batch size & Elapsed (s) & Throughput (tok/s) \\
 
 \subsection{Ablation: Quantization Impact}
 
-We compare Qwen2.5-14B in bfloat16 against its AWQ 4-bit quantized
-variant on an identical incident subset. The quantized model achieves
-F1 = 0.739 versus 0.730 for the full-precision model - a difference well
-within run-to-run variation and not a meaningful improvement - while
+We compare Qwen2.5-14B in bfloat16 against its AWQ~\cite{lin2024awq}
+4-bit quantized variant -- one of several post-training weight
+quantization approaches alongside GPTQ~\cite{frantar2023gptq} and
+8-bit matrix multiplication~\cite{dettmers2022llmint8} that trade
+precision for memory footprint --
+on an identical incident subset. The quantized model achieves
+F1 = 0.739 versus 0.730 for the full-precision model -- a difference well
+within run-to-run variation and not a meaningful improvement -- while
 completing the same workload in 4.04s versus 5.06s, a 20\% latency
 reduction. For this structured-output RCA task, 4-bit quantization
 therefore incurs no measurable accuracy cost while reducing both latency
@@ -378,9 +595,9 @@ Mistral-Small's F1 advantage is concentrated in configurations where it is
 also well-calibrated (RAG, few-shot on BGL/Thunderbird); in zero-shot
 settings, its apparent competence is substantially an artifact of
 near-constant positive prediction. A deployment that cannot guarantee
-retrieval infrastructure or curated few-shot examples at inference time -
+retrieval infrastructure or curated few-shot examples at inference time --
 for instance, a cold-start incident with no similar historical precedent
-to retrieve - would see Mistral-Small degrade toward unreliable behavior
+to retrieve -- would see Mistral-Small degrade toward unreliable behavior
 more readily than Qwen2.5-14B, which remains closer to calibrated even
 under zero-shot prompting. This is a practically important distinction
 that a single aggregate F1 number obscures, and we recommend that future
@@ -389,7 +606,7 @@ calibration diagnostic) alongside F1 as standard practice.
 
 The strength of RAG in this benchmark is consistent with the intuition
 that retrieved historical incidents provide the model with concrete,
-task-relevant priors on what "anomaly" looks like in a given log format -
+task-relevant priors on what "anomaly" looks like in a given log format --
 effectively a form of in-context calibration that generic few-shot
 examples (written once, reused across all queries) cannot provide, since
 few-shot examples are the same regardless of the incoming incident, while
@@ -403,7 +620,7 @@ objective trained exclusively on normal sequences. To ensure a fair
 comparison, we evaluate DeepLog on a held-out set disjoint from its
 training data (an 80/20 split of normal sequences, with the held-out 20\%
 combined with a randomly sampled equal number of anomalous sequences to
-match the LLM benchmark's balanced 50/50 evaluation protocol) - an
+match the LLM benchmark's balanced 50/50 evaluation protocol) -- an
 important methodological correction, since evaluating on training-set
 normal sequences (data leakage) initially produced an inflated F1 of 0.913
 that did not reflect genuine generalization.
@@ -411,13 +628,13 @@ that did not reflect genuine generalization.
 Under this corrected protocol, DeepLog achieves F1 = 0.698 (Precision =
 0.584, Recall = 0.867), placing it between Qwen2.5-14B (mean F1 = 0.560)
 and Mistral-Small (mean F1 = 0.644) in raw F1, but with a predicted-positive
-rate of 0.742 - meaningfully elevated relative to the true 50\% base rate,
+rate of 0.742 -- meaningfully elevated relative to the true 50\% base rate,
 though below our degenerate threshold. This indicates DeepLog, like the
 LLMs under zero-shot prompting, has some bias toward over-predicting
 anomalies rather than a strong, learned sense of the true decision
 boundary at this scale of training data (240 training sequences per
 dataset). Unlike the LLM-based approaches, DeepLog produces no natural
-language root-cause explanation, only a binary anomaly flag - for
+language root-cause explanation, only a binary anomaly flag -- for
 practitioners who need the model to explain *why* an incident is
 anomalous rather than only flag *that* it is, DeepLog cannot substitute
 for the RCA capability regardless of its F1.
@@ -467,9 +684,14 @@ differently; our comparison should be read as indicative rather than
 definitive on this point.
 
 \textbf{Two-model scope.} Results in this version reflect two open-weight
-models (Qwen2.5-14B, Mistral-Small); a third model (Llama-3.1-8B) was
+models (Qwen2.5-14B, Mistral-Small); a third model
+(Llama-3.1-8B~\cite{touvron2023llama2}) was
 pending gated-repository approval from the model provider at submission
-time and is planned as an addition once access is granted. A 70B-class
+time and is planned as an addition once access is granted, alongside a
+mixture-of-experts model such as Mixtral~\cite{jiang2024mixtral} and the
+base LLaMA family~\cite{touvron2023llama} to test
+whether our calibration findings generalize across architecture families.
+A 70B-class
 quantized model and a cloud API baseline are similarly planned additions
 (see Conclusion and Future Work).
 
@@ -486,7 +708,7 @@ We presented TriCalRAG, a benchmark for on-premise LLM-based root
 cause analysis evaluated entirely on a single workstation GPU. Across four
 real log datasets, two open-weight models, and three prompting strategies,
 we find that retrieval-augmented prompting is the most reliable
-configuration - not primarily because it improves F1 (though it does, by
+configuration -- not primarily because it improves F1 (though it does, by
 0.10--0.27 over zero-shot), but because it substantially stabilizes model
 calibration: 7 of 8 RAG configurations remain calibrated within our
 threshold versus only 2 of 8 zero-shot configurations. This matters
@@ -516,14 +738,14 @@ baseline would ground the local-versus-cloud cost argument
 quantitatively. Second, block-aware windowing for HDFS should resolve the
 evaluation-unit mismatch we identify as the likely cause of uniformly
 depressed HDFS performance. Third, evaluating the semantic quality of
-generated root-cause explanations - not only binary detection accuracy -
+generated root-cause explanations -- not only binary detection accuracy --
 would test the capability that most distinguishes LLM-based RCA from
 classical detectors, though doing so rigorously requires either manual
 annotation or an LLM-as-judge protocol with its own validity caveats.
 
 Finally, a preliminary exploration extending attribution beyond the
-application layer - to hardware telemetry (GPU/BMC sensors) and further
-to boot-trust and bare-metal provisioning signals - is included in the
+application layer -- to hardware telemetry (GPU/BMC sensors) and further
+to boot-trust and bare-metal provisioning signals -- is included in the
 project repository's \texttt{extensions/} directory. These use
 synthetically generated data, since no public dataset pairs real
 telemetry at these layers with labeled incidents at scale, and are
