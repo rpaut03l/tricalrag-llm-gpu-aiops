@@ -1,4 +1,4 @@
-# TriCalRAG — End-to-End: Setup → Benchmark → Paper → arXiv
+# TriCalRAG - End-to-End: Setup → Benchmark → Paper → arXiv
 
 **Status log:** this file is the living record of what's actually been done vs. what's next. Update it as each phase completes — don't let it drift out of sync with reality (an earlier version of this file predated the repo's actual structure; this rewrite fixes that).
 
@@ -7,7 +7,7 @@ A **benchmark**, not a one-off experiment: 4 real log datasets (BGL, HDFS, Thund
 
 ---
 
-## PHASE 0 — Machine Facts (recorded, don't re-verify unless something changes)
+## PHASE 0 - Machine Facts (recorded, don't re-verify unless something changes)
 
 - **GPU**: NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition, 96GB VRAM (97,887 MiB), idle at baseline
 - **Driver**: 595.58.03, **CUDA**: 13.2 (driver-reported)
@@ -27,7 +27,7 @@ nvidia-smi
 nvidia-smi --query-gpu=compute_cap --format=csv
 ```
 
-## PHASE 1 — Clone + Environment Setup
+## PHASE 1 - Clone + Environment Setup
 
 **Status: done**
 
@@ -47,9 +47,9 @@ cd benchmark
 pip install -r requirements.txt
 ```
 
-**Step 1.5 — Blackwell/vLLM note**: NOT needed on this machine. The stable `pip install -r requirements.txt` resolved to `vllm==0.28.0` + `torch==2.13.0+cu130`, both with native Blackwell support out of the box. Skip the nightly-build workaround unless a future dependency resolution regresses this.
+**Step 1.5 - Blackwell/vLLM note**: NOT needed on this machine. The stable `pip install -r requirements.txt` resolved to `vllm==0.28.0` + `torch==2.13.0+cu130`, both with native Blackwell support out of the box. Skip the nightly-build workaround unless a future dependency resolution regresses this.
 
-**Sanity check — confirmed passing:**
+**Sanity check - confirmed passing:**
 ```bash
 python3 -c "import torch; print(torch.__version__, torch.cuda.is_available(), torch.cuda.get_device_name(0))"
 # Output: 2.13.0+cu130 True NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition
@@ -66,9 +66,9 @@ Verify:
 hf auth whoami
 ```
 
-## PHASE 2 — Get the 4 Datasets
+## PHASE 2 - Get the 4 Datasets
 
-**Status: done — real datasets downloaded and verified on the GPU machine**
+**Status: done - real datasets downloaded and verified on the GPU machine**
 
 The public `git clone https://github.com/logpai/loghub.git` only ships 2,000-line **demo samples**, not the full datasets — each dataset's README circularly points back at the GitHub repo itself. The real full datasets live on **Zenodo (record 8196385)**, freely downloadable with no login or approval process:
 
@@ -100,11 +100,11 @@ loghub/full_datasets/anomaly_labels.txt                        (lists VM instanc
 loghub/full_datasets/Thunderbird.log                           (31.7 GB — DO NOT load directly, see below)
 ```
 
-**Thunderbird is 31.7GB — do not load the full file.** Our loader uses `readlines()`, which would try to pull the entire file into RAM. Create a bounded subset instead:
+**Thunderbird is 31.7GB - do not load the full file.** Our loader uses `readlines()`, which would try to pull the entire file into RAM. Create a bounded subset instead:
 ```bash
 head -n 2000000 Thunderbird.log > Thunderbird_subset.log
 ```
-This gives ~257MB (2M lines) — manageable, and still large enough for a representative anomaly/normal mix.
+This gives ~257MB (2M lines) - manageable, and still large enough for a representative anomaly/normal mix.
 
 **OpenStack is NOT one combined log with inline anomaly markers** (our original loader assumed this — it was wrong). The real format is three separate files: `openstack_normal1.log` and `openstack_normal2.log` (no anomalies), and `openstack_abnormal.log` (contains injected anomalies tied to 4 specific VM instance UUIDs listed in `anomaly_labels.txt`). Fixed in `multi_dataset_loader.py`: `parse_openstack()` now takes three file paths and labels all abnormal-file lines as anomalous, all normal-file lines as normal.
 
@@ -115,17 +115,17 @@ cd ~/tricalrag-llm-gpu-aiops/benchmark
 python loaders/multi_dataset_loader.py --seed 42 --out data/incidents.jsonl
 ```
 
-**Confirmed working on the GPU machine** — output:
+**Confirmed working on the GPU machine** - output:
 ```
 Wrote 600 incidents to data/incidents.jsonl
 Per-dataset breakdown: {'bgl': 150, 'hdfs': 150, 'thunderbird': 150, 'openstack': 150}
 ```
-Clean 150/dataset balanced split, no errors — BGL's real format matched the parser's column assumptions without needing adjustment.
+Clean 150/dataset balanced split, no errors - BGL's real format matched the parser's column assumptions without needing adjustment.
 **Why:** normalizes all 4 datasets into one schema — 150 balanced incidents each, 600 total. Check the printed per-dataset breakdown before moving on.
 
-## PHASE 3 — Run the Main Benchmark (3 seeds × 3 prompt styles)
+## PHASE 3 - Run the Main Benchmark (3 seeds × 3 prompt styles)
 
-**Status: done (2-model sweep) — all 9 seed×style combos complete for Qwen2.5-14B + Mistral-Small (1201 lines each, 2 models × 600 incidents + header). Llama-3.1-8B and the 70B model still pending (see below).**
+**Status: done (2-model sweep) - all 9 seed×style combos complete for Qwen2.5-14B + Mistral-Small (1201 lines each, 2 models × 600 incidents + header). Llama-3.1-8B and the 70B model still pending (see below).**
 
 **Bug hit and fixed during this run**: RAG prompts (which inject 3 retrieved past incidents as context) overflowed the original `max_model_len=4096` — retrieved context pushed some prompts to 4097+ tokens. All 3 RAG runs (seeds 1/2/3) failed identically with `VLLMValidationError: maximum context length is 4096 tokens`, while zero-shot and few-shot (no retrieval context) completed fine. **Fix**: bumped `max_model_len=4096` → `max_model_len=8192` in `benchmark.py`. Re-ran only the 3 broken RAG files (deleted the header-only stubs first so the smart-resume loop didn't skip them) — all completed successfully after the fix.
 
@@ -208,7 +208,7 @@ If the 70B model (once enabled) hits VRAM limits, comment it out of `MODELS` and
 
 **Timing estimate**: 2 models × 3 seeds × 3 styles = 18 runs. At ~90s per run (confirmed Qwen timing; Mistral may run somewhat slower) plus a one-time Mistral-Small download (~44GB, not yet cached — could take 10-20+ min depending on connection speed), expect roughly **30–60 minutes** for this 2-model sweep. Once Llama access clears and/or the 70B is added, re-run with the full 4-model list — that full sweep will take longer (~1.5–2.5 hours), primarily driven by the 70B's larger size.
 
-## PHASE 4 — Score with Bootstrap CI
+## PHASE 4 - Score with Bootstrap CI
 
 **Status: not started**
 
@@ -217,7 +217,7 @@ python score_results.py
 ```
 Produces `results/summary_metrics.csv` (per-dataset, per-model, with 95% CI) and `results/macro_summary.csv` (macro-averaged headline table).
 
-## PHASE 5 — Run Ablations
+## PHASE 5 - Run Ablations
 
 **Status: not started**
 
@@ -226,7 +226,7 @@ python ablation.py --mode batch_sweep
 python ablation.py --mode quantization
 ```
 
-## PHASE 6 — Run the DeepLog Baseline
+## PHASE 6 - Run the DeepLog Baseline
 
 **Status: not started**
 
@@ -236,13 +236,13 @@ python deeplog_baseline.py
 ```
 Output lands in `../benchmark/results/deeplog_baseline.json`.
 
-## PHASE 7 — (Optional) Cloud API Baseline
+## PHASE 7 - (Optional) Cloud API Baseline
 
 **Status: not started**
 
 Add a script calling GPT-4o-mini or Claude Haiku on the same `data/incidents.jsonl` with the same prompt template, log latency + cost per call, score identically. Needed for the "local vs. cloud" comparison claim in the abstract.
 
-## PHASE 8 — Generate Figures + Write the Paper
+## PHASE 8 - Generate Figures + Write the Paper
 
 **Status: not started**
 
@@ -259,7 +259,7 @@ pdflatex main.tex && bibtex main && pdflatex main.tex && pdflatex main.tex
 ```
 Proofread `main.pdf` fully before moving on.
 
-## PHASE 9 — GitHub
+## PHASE 9 - GitHub
 
 **Status: done** — repo live at `https://github.com/rpaut03l/tricalrag-llm-gpu-aiops`, restructured (core benchmark vs. `extensions/`) on `main` as of the `restructure/core-vs-extensions` PR merge.
 
@@ -273,7 +273,7 @@ git push -u origin add-benchmark-results
 gh pr create --title "Add real benchmark results" --base main
 ```
 
-## PHASE 10 — arXiv Submission
+## PHASE 10 - arXiv Submission
 
 **Status: not started**
 
@@ -284,7 +284,7 @@ gh pr create --title "Add real benchmark results" --base main
 5. Review the compiled PDF preview carefully, then finalize
 6. Wait for moderation (1–2 business days) → get arXiv ID
 
-## PHASE 11 — Hugging Face Papers + Papers with Code
+## PHASE 11 - Hugging Face Papers + Papers with Code
 
 **Status: not started**
 
@@ -293,7 +293,7 @@ Once you have an arXiv ID:
 2. Submit to https://paperswithcode.com/submit, linking the GitHub repo
 3. Consider uploading `data/incidents.jsonl` splits to Hugging Face Datasets (respecting each source dataset's original license terms)
 
-## PHASE 12 — AI-SPC 2026 Workshop Submission (parallel, optional)
+## PHASE 12 - AI-SPC 2026 Workshop Submission (parallel, optional)
 
 **Status: not started**
 
