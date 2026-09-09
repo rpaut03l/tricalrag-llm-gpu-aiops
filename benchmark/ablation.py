@@ -33,7 +33,7 @@ def load_incidents(path, n=100):
     return incidents[:n]
 
 def run_batch_sweep(model_hf_id, incidents, batch_sizes, out_path):
-    llm = LLM(model=model_hf_id, dtype="auto", gpu_memory_utilization=0.85, max_model_len=4096)
+    llm = LLM(model=model_hf_id, dtype="auto", gpu_memory_utilization=0.85, max_model_len=8192)
     sampling_params = SamplingParams(temperature=0.0, max_tokens=200)
 
     rows = []
@@ -66,7 +66,7 @@ def run_quantization_comparison(fp16_hf_id, awq_hf_id, incidents, out_path):
 
     results = {}
     for label, hf_id in [("fp16", fp16_hf_id), ("awq_4bit", awq_hf_id)]:
-        llm = LLM(model=hf_id, dtype="auto", gpu_memory_utilization=0.85, max_model_len=4096)
+        llm = LLM(model=hf_id, dtype="auto", gpu_memory_utilization=0.85, max_model_len=8192)
         sampling_params = SamplingParams(temperature=0.0, max_tokens=200)
         prompts = [build_prompt(inc["log_window"]) for inc in incidents]
 
@@ -111,15 +111,15 @@ def main():
 
     if args.mode == "batch_sweep":
         run_batch_sweep(
-            model_hf_id="meta-llama/Llama-3.1-8B-Instruct",
+            model_hf_id="Qwen/Qwen2.5-14B-Instruct",
             incidents=incidents,
             batch_sizes=[1, 8, 32, 64, 128],
             out_path="results/ablation_batch_sweep.csv",
         )
     elif args.mode == "quantization":
         run_quantization_comparison(
-            fp16_hf_id="meta-llama/Llama-3.1-8B-Instruct",
-            awq_hf_id="hugging-quants/Meta-Llama-3.1-8B-Instruct-AWQ-INT4",
+            fp16_hf_id="Qwen/Qwen2.5-14B-Instruct",
+            awq_hf_id="Qwen/Qwen2.5-14B-Instruct-AWQ",
             incidents=incidents,
             out_path="results/ablation_quantization.csv",
         )
