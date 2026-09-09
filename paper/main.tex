@@ -85,7 +85,9 @@ LLMs served locally via vLLM~\cite{vllm2023} on a single NVIDIA RTX PRO
 datasets~\cite{loghub} and three prompting strategies (zero-shot,
 few-shot, and retrieval-augmented generation over a labeled incident
 history), compared against a classical LSTM-based
-detector~\cite{deeplog2017}.
+detector~\cite{deeplog2017}. The retrieval component builds on our earlier
+work characterizing robustness properties of RAG
+pipelines~\cite{rohitpatel2026trishieldrag}.
 
 Our contributions are:
 \begin{enumerate}
@@ -145,8 +147,9 @@ we evaluate retrieval as one of three prompting strategies in a
 controlled comparison rather than as a standalone system; and our focus
 is the effect of retrieval on \emph{calibration}, not only on detection
 accuracy. Our retrieval design is additionally informed by our prior work
-on RAG pipeline robustness, TriShieldRAG~\cite{rohitpatel2026trishieldrag},
-which addresses knowledge-corruption risks in retrieval-augmented
+on RAG pipeline robustness, TriShieldRAG (Mohanty, Patel, Yuvaraj,
+Chaudhary, and Singhania~\cite{rohitpatel2026trishieldrag}), which
+addresses knowledge-corruption risks in retrieval-augmented
 systems; while that work targets adversarial robustness rather than RCA,
 its retrieval-scoring principles inform how we treat retrieved incident
 precedent here.
