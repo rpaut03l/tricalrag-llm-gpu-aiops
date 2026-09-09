@@ -1,0 +1,10 @@
+{
+  "f1": 0.697986577181208,
+  "precision": 0.5842696629213483,
+  "recall": 0.8666666666666667,
+  "predicted_positive_rate": 0.7416666666666667,
+  "calibration_flag": "ok",
+  "n_train_normal": 240,
+  "n_eval_normal": 60,
+  "n_eval_anomalous": 300
+}

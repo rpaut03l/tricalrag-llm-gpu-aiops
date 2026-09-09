@@ -2,15 +2,14 @@
 WHY this baseline matters: a benchmark paper that only compares LLMs against
 each other invites the question "but is any of this better than a simple
 classical detector?" DeepLog (Du et al. 2017) is THE canonical non-LLM log
-anomaly baseline everyone in this field cites. Beating/matching it with an
-LLM-based approach is a citable, meaningful claim; losing to it is also an
-honest and useful finding.
+anomaly baseline everyone in this field cites.
 
-This is a lightweight re-implementation (not the full DeepLog paper) using
-an LSTM over log-key sequences, sufficient as a fair baseline reference point.
+This is a lightweight re-implementation using an LSTM over log-key
+sequences, with a proper train/test split to avoid data leakage.
 """
 
 import json
+import math
 import numpy as np
 from pathlib import Path
 from collections import Counter
@@ -29,27 +28,25 @@ class LogKeyLSTM(nn.Module):
     def forward(self, x):
         e = self.embed(x)
         out, _ = self.lstm(e)
-        return self.fc(out[:, -1, :])   # predict next log key
+        return self.fc(out[:, -1, :])
 
 def tokenize_logs_to_keys(incidents):
-    """Map each unique log line (roughly a 'log template') to an integer key."""
     vocab = {}
     sequences = []
     for inc in incidents:
         lines = inc["log_window"].split("\n")
         keys = []
         for line in lines:
-            # crude templating: strip numbers to group similar lines
             template = "".join(c if not c.isdigit() else "#" for c in line)
             if template not in vocab:
-                vocab[template] = len(vocab) + 1  # 0 reserved for padding
+                vocab[template] = len(vocab) + 1
             keys.append(vocab[template])
         sequences.append(keys)
     return sequences, vocab
 
-def train_deeplog(train_sequences, vocab_size, window=4, epochs=5):
+def train_deeplog(train_sequences, vocab_size, window=4, epochs=30, batch_size=64, lr=1e-3):
     model = LogKeyLSTM(vocab_size + 1)
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     criterion = nn.CrossEntropyLoss()
 
     X, y = [], []
@@ -62,20 +59,31 @@ def train_deeplog(train_sequences, vocab_size, window=4, epochs=5):
 
     X = torch.tensor(X, dtype=torch.long)
     y = torch.tensor(y, dtype=torch.long)
+    n = len(X)
+    random_baseline_loss = math.log(vocab_size + 1)
+    print(f"Training on {n} pairs, vocab_size={vocab_size}")
+    print(f"Random-guessing baseline loss: {random_baseline_loss:.4f}")
 
     for epoch in range(epochs):
-        optimizer.zero_grad()
-        out = model(X)
-        loss = criterion(out, y)
-        loss.backward()
-        optimizer.step()
-        print(f"  epoch {epoch+1}/{epochs} loss={loss.item():.4f}")
+        perm = torch.randperm(n)
+        total_loss, n_batches = 0.0, 0
+        for start in range(0, n, batch_size):
+            idx = perm[start:start + batch_size]
+            xb, yb = X[idx], y[idx]
+            optimizer.zero_grad()
+            out = model(xb)
+            loss = criterion(out, yb)
+            loss.backward()
+            optimizer.step()
+            total_loss += loss.item()
+            n_batches += 1
+        avg_loss = total_loss / n_batches
+        if (epoch + 1) % 5 == 0 or epoch == 0:
+            print(f"  epoch {epoch+1}/{epochs} avg_loss={avg_loss:.4f}")
 
     return model
 
 def predict_anomaly(model, sequence, window=4, top_k=9):
-    """DeepLog's core idea: if the actual next log key isn't in the model's
-    top-k predicted keys, flag it as anomalous."""
     if len(sequence) <= window:
         return False
     flags = []
@@ -89,35 +97,63 @@ def predict_anomaly(model, sequence, window=4, top_k=9):
     return any(flags)
 
 def main():
-    with open("data/incidents.jsonl") as f:
+    with open("../benchmark/data/incidents.jsonl") as f:
         incidents = [json.loads(line) for line in f]
 
     sequences, vocab = tokenize_logs_to_keys(incidents)
     vocab_size = len(vocab)
-    print(f"Vocabulary size (unique log templates): {vocab_size}")
+    print(f"Vocabulary size: {vocab_size}")
 
-    # Train only on NORMAL sequences (DeepLog's core assumption:
-    # model learns "normal" patterns, flags deviations)
     normal_idx = [i for i, inc in enumerate(incidents) if not inc["is_anomaly"]]
-    train_sequences = [sequences[i] for i in normal_idx]
+    anomaly_idx = [i for i, inc in enumerate(incidents) if inc["is_anomaly"]]
 
-    print("Training DeepLog-style LSTM baseline on normal sequences only...")
+    rng = np.random.default_rng(42)
+    shuffled_normal = rng.permutation(normal_idx)
+    split_point = int(len(shuffled_normal) * 0.8)
+    train_normal_idx = shuffled_normal[:split_point].tolist()
+    test_normal_idx = shuffled_normal[split_point:].tolist()
+
+    print(f"Normal: {len(normal_idx)} total -> {len(train_normal_idx)} train / {len(test_normal_idx)} test")
+    print(f"Anomalous (all held out): {len(anomaly_idx)}")
+
+    train_sequences = [sequences[i] for i in train_normal_idx]
+    print("Training on TRAIN-SPLIT normal sequences only...")
     model = train_deeplog(train_sequences, vocab_size)
 
+    # Balance the eval set to match the LLM benchmark's 50/50 anomaly/normal
+    # split -- otherwise predicted-positive-rate and F1 aren't comparable
+    # across the two evaluations (an 83%-anomalous eval set makes even a
+    # majority-class guess look artificially well-calibrated).
+    eval_rng = np.random.default_rng(123)
+    sampled_anomaly_idx = eval_rng.choice(anomaly_idx, size=len(test_normal_idx), replace=False).tolist()
+    eval_idx = test_normal_idx + sampled_anomaly_idx
+    print(f'Balanced eval set: {len(test_normal_idx)} normal + {len(sampled_anomaly_idx)} anomalous (50/50)')
+
     preds, gt = [], []
-    for inc, seq in zip(incidents, sequences):
-        pred_anomaly = predict_anomaly(model, seq)
-        preds.append(pred_anomaly)
-        gt.append(inc["is_anomaly"])
+    for i in eval_idx:
+        preds.append(predict_anomaly(model, sequences[i]))
+        gt.append(incidents[i]["is_anomaly"])
 
     f1 = f1_score(gt, preds, zero_division=0)
     prec = precision_score(gt, preds, zero_division=0)
     rec = recall_score(gt, preds, zero_division=0)
-    print(f"\nDeepLog-style baseline: F1={f1:.3f} Precision={prec:.3f} Recall={rec:.3f}")
+    predicted_positive_rate = sum(preds) / len(preds)
+    is_degenerate = predicted_positive_rate > 0.85 or predicted_positive_rate < 0.15
+
+    print(f"Evaluated on {len(eval_idx)} held-out incidents")
+    print(f"DeepLog baseline: F1={f1:.3f} Precision={prec:.3f} Recall={rec:.3f}")
+    print(f"Predicted-positive rate: {predicted_positive_rate:.3f} ({'DEGENERATE' if is_degenerate else 'ok'})")
 
     Path("../benchmark/results").mkdir(parents=True, exist_ok=True)
     with open("../benchmark/results/deeplog_baseline.json", "w") as f:
-        json.dump({"f1": f1, "precision": prec, "recall": rec}, f, indent=2)
+        json.dump({
+            "f1": f1, "precision": prec, "recall": rec,
+            "predicted_positive_rate": predicted_positive_rate,
+            "calibration_flag": "DEGENERATE" if is_degenerate else "ok",
+            "n_train_normal": len(train_normal_idx),
+            "n_eval_normal": len(test_normal_idx),
+            "n_eval_anomalous": len(anomaly_idx),
+        }, f, indent=2)
 
 if __name__ == "__main__":
     main()
