@@ -381,7 +381,7 @@ If you use TriCalRAG in your research, please cite:
   title={TriCalRAG: A Three-Strategy, Retrieval-Augmented Benchmark for On-Premise LLM-Based Root Cause Analysis in AIOps},
   author={Patel, Rohit and Mohanty, Susil Kumar and Chaudhary, Jeenal},
   year={2026},
-  howpublished={\url{https://github.com/rpaut03l/tricalrag-llm-gpu-aiops}}
+  howpublished={\url{https://github.com/SPriTLab-iitj/TriCalRAG}}
 }
 ```
 
