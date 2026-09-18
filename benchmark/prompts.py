@@ -50,35 +50,6 @@ Respond with ONLY a JSON object (no extra text) in this exact format:
 }}
 """
 
-FEW_SHOT_TEMPLATE = """You are an SRE assistant analyzing system logs to detect and explain incidents.
-
-Example 1:
-Log window:
-INFO dfs.DataNode: Received block blk_123 of size 512
-INFO dfs.DataNode: Served block blk_123 to /10.0.0.5
-Answer: {{"is_anomaly": false, "severity": "low", "root_cause": "none", "remediation": "none"}}
-
-Example 2:
-Log window:
-ERROR dfs.DataNode: Exception in receiveBlock for block blk_456
-ERROR dfs.DataNode: java.io.IOException: Connection reset by peer
-WARN dfs.DataNode: Retrying block transfer blk_456
-Answer: {{"is_anomaly": true, "severity": "high", "root_cause": "Network connection was reset during block transfer, likely due to a transient network fault or overloaded DataNode.", "remediation": "Increase retry timeout and monitor network stability between DataNodes."}}
-
-Now analyze this log window:
----
-{log_window}
----
-
-Respond with ONLY a JSON object (no extra text) in this exact format:
-{{
-  "is_anomaly": true or false,
-  "severity": "low" | "medium" | "high" | "critical",
-  "root_cause": "one sentence explanation of what went wrong, or 'none' if normal",
-  "remediation": "one sentence suggested fix, or 'none' if normal"
-}}
-"""
-
 RAG_TEMPLATE = """You are an SRE assistant analyzing system logs to detect and explain incidents.
 You have access to similar past incidents retrieved from an incident history database.
 Use them as precedent, but base your final judgment on the CURRENT log window.
